@@ -14,7 +14,7 @@ type Option interface {
 
 type Options struct {
 	Scheme              *runtime.Scheme
-	ManifestDirs        []string
+	Manifests           []string
 	Objects             []client.Object
 	CertDir             string
 	AutoInstallWebhooks bool
@@ -34,8 +34,8 @@ func (o *Options) ApplyToOptions(target *Options) {
 	if o.Scheme != nil {
 		target.Scheme = o.Scheme
 	}
-	if len(o.ManifestDirs) > 0 {
-		target.ManifestDirs = append(target.ManifestDirs, o.ManifestDirs...)
+	if len(o.Manifests) > 0 {
+		target.Manifests = append(target.Manifests, o.Manifests...)
 	}
 	if len(o.Objects) > 0 {
 		target.Objects = append(target.Objects, o.Objects...)
@@ -71,28 +71,28 @@ func (s *Scheme) ApplyToOptions(o *Options) {
 	o.Scheme = s.scheme
 }
 
-type ManifestDir struct {
+type Manifest struct {
 	path string
 }
 
-func WithManifestDir(p string) Option {
-	return &ManifestDir{path: p}
+func WithManifest(p string) Option {
+	return &Manifest{path: p}
 }
 
-func (m *ManifestDir) ApplyToOptions(o *Options) {
-	o.ManifestDirs = append(o.ManifestDirs, m.path)
+func (m *Manifest) ApplyToOptions(o *Options) {
+	o.Manifests = append(o.Manifests, m.path)
 }
 
-type ManifestDirs struct {
+type Manifests struct {
 	paths []string
 }
 
-func WithManifestDirs(paths ...string) Option {
-	return &ManifestDirs{paths: paths}
+func WithManifests(paths ...string) Option {
+	return &Manifests{paths: paths}
 }
 
-func (m *ManifestDirs) ApplyToOptions(o *Options) {
-	o.ManifestDirs = append(o.ManifestDirs, m.paths...)
+func (m *Manifests) ApplyToOptions(o *Options) {
+	o.Manifests = append(o.Manifests, m.paths...)
 }
 
 type CertDir struct {

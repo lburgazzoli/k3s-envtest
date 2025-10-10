@@ -16,8 +16,8 @@ func TestOptions_FunctionalStyle(t *testing.T) {
 	env, err := k3senv.New(
 		k3senv.WithScheme(scheme),
 		k3senv.WithCertDir(testCertDir),
-		k3senv.WithManifestDir("/path/to/manifests1"),
-		k3senv.WithManifestDirs("/path/to/manifests2", "/path/to/manifests3"),
+		k3senv.WithManifest("/path/to/manifests1"),
+		k3senv.WithManifests("/path/to/manifests2", "/path/to/manifests3"),
 	)
 
 	if err != nil {
@@ -37,9 +37,9 @@ func TestOptions_StructStyle(t *testing.T) {
 	scheme := runtime.NewScheme()
 
 	env, err := k3senv.New(&k3senv.Options{
-		Scheme:       scheme,
-		CertDir:      testCertDir,
-		ManifestDirs: []string{"/path/to/manifests1", "/path/to/manifests2"},
+		Scheme:    scheme,
+		CertDir:   testCertDir,
+		Manifests: []string{"/path/to/manifests1", "/path/to/manifests2"},
 	})
 
 	if err != nil {
@@ -60,11 +60,11 @@ func TestOptions_MixedStyle(t *testing.T) {
 
 	env, err := k3senv.New(
 		&k3senv.Options{
-			Scheme:       scheme,
-			ManifestDirs: []string{"/path/to/manifests1"},
+			Scheme:    scheme,
+			Manifests: []string{"/path/to/manifests1"},
 		},
 		k3senv.WithCertDir(testCertDir),
-		k3senv.WithManifestDir("/path/to/manifests2"),
+		k3senv.WithManifest("/path/to/manifests2"),
 	)
 
 	if err != nil {
@@ -89,7 +89,7 @@ func TestOptions_ApplyToOptions(t *testing.T) {
 	}
 
 	opt2 := &k3senv.Options{
-		ManifestDirs: []string{"/path/to/manifests"},
+		Manifests: []string{"/path/to/manifests"},
 	}
 
 	target := &k3senv.Options{}
@@ -104,7 +104,7 @@ func TestOptions_ApplyToOptions(t *testing.T) {
 		t.Errorf("certDir = %q, want %q", target.CertDir, testCertDir)
 	}
 
-	if len(target.ManifestDirs) != 1 {
-		t.Errorf("len(manifestDirs) = %d, want 1", len(target.ManifestDirs))
+	if len(target.Manifests) != 1 {
+		t.Errorf("len(manifests) = %d, want 1", len(target.Manifests))
 	}
 }

@@ -78,7 +78,7 @@ type K3sEnv struct {
 	certData  *CertData
 
 	k3sImage            string
-	manifestDirs        []string
+	manifests           []string
 	objects             []client.Object
 	autoInstallWebhooks bool
 	webhookPort         int
@@ -113,7 +113,7 @@ func New(opts ...Option) (*K3sEnv, error) {
 		certDir:             options.CertDir,
 		teardownTasks:       []TeardownTask{},
 		k3sImage:            options.K3sImage,
-		manifestDirs:        options.ManifestDirs,
+		manifests:           options.Manifests,
 		objects:             options.Objects,
 		autoInstallWebhooks: options.AutoInstallWebhooks,
 		webhookPort:         options.WebhookPort,
@@ -398,9 +398,9 @@ func (e *K3sEnv) setupCertificates() error {
 func (e *K3sEnv) prepareManifests() error {
 	e.manifestCategories = ManifestCategories{}
 
-	if len(e.manifestDirs) > 0 {
-		if err := e.loadManifestsFromDirs(e.manifestDirs); err != nil {
-			return fmt.Errorf("failed to load manifests from directories: %w", err)
+	if len(e.manifests) > 0 {
+		if err := e.loadManifestsFromPaths(e.manifests); err != nil {
+			return fmt.Errorf("failed to load manifests from paths: %w", err)
 		}
 	}
 
@@ -429,7 +429,7 @@ func (e *K3sEnv) installCRDsIfNeeded(ctx context.Context) error {
 	return nil
 }
 
-func (e *K3sEnv) loadManifestsFromDirs(paths []string) error {
+func (e *K3sEnv) loadManifestsFromPaths(paths []string) error {
 	for _, path := range paths {
 		resolvedPath := path
 		if !filepath.IsAbs(path) {
@@ -440,24 +440,47 @@ func (e *K3sEnv) loadManifestsFromDirs(paths []string) error {
 			resolvedPath = filepath.Join(projectRoot, path)
 		}
 
-		if _, err := os.Stat(resolvedPath); err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("manifest directory does not exist: %s", resolvedPath)
+		if strings.ContainsAny(resolvedPath, "*?[]") {
+			matches, err := filepath.Glob(resolvedPath)
+			if err != nil {
+				return fmt.Errorf("invalid glob pattern %s: %w", resolvedPath, err)
 			}
-			return fmt.Errorf("failed to access manifest directory %s: %w", resolvedPath, err)
-		}
+			if len(matches) == 0 {
+				return fmt.Errorf("glob pattern matched no files: %s", resolvedPath)
+			}
 
-		if err := e.loadManifestsFromDir(resolvedPath); err != nil {
-			return fmt.Errorf("failed to load manifests from %s: %w", resolvedPath, err)
+			for _, match := range matches {
+				if err := e.loadManifestPath(match); err != nil {
+					return err
+				}
+			}
+		} else {
+			if err := e.loadManifestPath(resolvedPath); err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
 }
 
-func (e *K3sEnv) loadManifestsFromDir(dir string) error {
-	decoder := serializer.NewCodecFactory(e.scheme).UniversalDeserializer()
+func (e *K3sEnv) loadManifestPath(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("manifest path does not exist: %s", path)
+		}
+		return fmt.Errorf("failed to access manifest path %s: %w", path, err)
+	}
 
+	if info.IsDir() {
+		return e.loadManifestsFromDir(path)
+	}
+
+	return e.loadManifestFromFile(path)
+}
+
+func (e *K3sEnv) loadManifestsFromDir(dir string) error {
 	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -472,29 +495,35 @@ func (e *K3sEnv) loadManifestsFromDir(dir string) error {
 			return nil
 		}
 
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("failed to read file %s: %w", path, err)
-		}
-
-		manifests, err := resources.Decode(decoder, data)
-		if err != nil {
-			return fmt.Errorf("failed to decode YAML from %s: %w", path, err)
-		}
-
-		for i := range manifests {
-			switch manifests[i].GroupVersionKind() {
-			case gvk.CustomResourceDefinition:
-				e.manifestCategories.CRDs = append(e.manifestCategories.CRDs, manifests[i])
-			case gvk.MutatingWebhookConfiguration:
-				e.manifestCategories.WebhookConfigs = append(e.manifestCategories.WebhookConfigs, manifests[i])
-			case gvk.ValidatingWebhookConfiguration:
-				e.manifestCategories.WebhookConfigs = append(e.manifestCategories.WebhookConfigs, manifests[i])
-			}
-		}
-
-		return nil
+		return e.loadManifestFromFile(path)
 	})
+}
+
+func (e *K3sEnv) loadManifestFromFile(filePath string) error {
+	decoder := serializer.NewCodecFactory(e.scheme).UniversalDeserializer()
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read file %s: %w", filePath, err)
+	}
+
+	manifests, err := resources.Decode(decoder, data)
+	if err != nil {
+		return fmt.Errorf("failed to decode YAML from %s: %w", filePath, err)
+	}
+
+	for i := range manifests {
+		switch manifests[i].GroupVersionKind() {
+		case gvk.CustomResourceDefinition:
+			e.manifestCategories.CRDs = append(e.manifestCategories.CRDs, manifests[i])
+		case gvk.MutatingWebhookConfiguration:
+			e.manifestCategories.WebhookConfigs = append(e.manifestCategories.WebhookConfigs, manifests[i])
+		case gvk.ValidatingWebhookConfiguration:
+			e.manifestCategories.WebhookConfigs = append(e.manifestCategories.WebhookConfigs, manifests[i])
+		}
+	}
+
+	return nil
 }
 
 func (e *K3sEnv) loadObjectsToManifests(objects []client.Object) error {
