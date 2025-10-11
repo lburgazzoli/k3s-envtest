@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -9,7 +10,7 @@ import (
 func FindProjectRoot() (string, error) {
 	currentDir, err := os.Getwd()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to get current directory: %w", err)
 	}
 
 	for {

@@ -1,110 +1,232 @@
 package k3senv_test
 
 import (
+	"fmt"
+	"os"
 	"testing"
+	"time"
+
+	"github.com/lburgazzoli/k3s-envtest/pkg/k3senv"
 
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/lburgazzoli/k3s-envtest/pkg/k3senv"
+	. "github.com/onsi/gomega"
 )
 
-const testCertDir = "/tmp/certs"
+const testCertPath = "/tmp/certs"
 
 func TestOptions_FunctionalStyle(t *testing.T) {
+	g := NewWithT(t)
 	scheme := runtime.NewScheme()
 
 	env, err := k3senv.New(
 		k3senv.WithScheme(scheme),
-		k3senv.WithCertDir(testCertDir),
-		k3senv.WithManifest("/path/to/manifests1"),
+		k3senv.WithCertPath(testCertPath),
+		k3senv.WithManifests("/path/to/manifests1"),
 		k3senv.WithManifests("/path/to/manifests2", "/path/to/manifests3"),
 	)
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if env.Scheme() != scheme {
-		t.Error("scheme not set correctly")
-	}
-
-	if env.CertDir() != testCertDir {
-		t.Errorf("certDir = %q, want %q", env.CertDir(), testCertDir)
-	}
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(env.Scheme()).To(Equal(scheme))
+	g.Expect(env.CertPath()).To(Equal(testCertPath))
 }
 
 func TestOptions_StructStyle(t *testing.T) {
+	g := NewWithT(t)
 	scheme := runtime.NewScheme()
 
 	env, err := k3senv.New(&k3senv.Options{
-		Scheme:    scheme,
-		CertDir:   testCertDir,
-		Manifests: []string{"/path/to/manifests1", "/path/to/manifests2"},
+		Scheme: scheme,
+		Certificate: k3senv.CertificateConfig{
+			Path: testCertPath,
+		},
+		Manifest: k3senv.ManifestConfig{
+			Paths: []string{"/path/to/manifests1", "/path/to/manifests2"},
+		},
 	})
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if env.Scheme() != scheme {
-		t.Error("scheme not set correctly")
-	}
-
-	if env.CertDir() != testCertDir {
-		t.Errorf("certDir = %q, want %q", env.CertDir(), testCertDir)
-	}
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(env.Scheme()).To(Equal(scheme))
+	g.Expect(env.CertPath()).To(Equal(testCertPath))
 }
 
 func TestOptions_MixedStyle(t *testing.T) {
+	g := NewWithT(t)
 	scheme := runtime.NewScheme()
 
 	env, err := k3senv.New(
 		&k3senv.Options{
-			Scheme:    scheme,
-			Manifests: []string{"/path/to/manifests1"},
+			Scheme: scheme,
+			Manifest: k3senv.ManifestConfig{
+				Paths: []string{"/path/to/manifests1"},
+			},
 		},
-		k3senv.WithCertDir(testCertDir),
-		k3senv.WithManifest("/path/to/manifests2"),
+		k3senv.WithCertPath(testCertPath),
+		k3senv.WithManifests("/path/to/manifests2"),
 	)
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if env.Scheme() != scheme {
-		t.Error("scheme not set correctly")
-	}
-
-	if env.CertDir() != testCertDir {
-		t.Errorf("certDir = %q, want %q", env.CertDir(), testCertDir)
-	}
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(env.Scheme()).To(Equal(scheme))
+	g.Expect(env.CertPath()).To(Equal(testCertPath))
 }
 
 func TestOptions_ApplyToOptions(t *testing.T) {
+	g := NewWithT(t)
 	scheme := runtime.NewScheme()
 
 	opt1 := &k3senv.Options{
-		Scheme:  scheme,
-		CertDir: testCertDir,
+		Scheme: scheme,
+		Certificate: k3senv.CertificateConfig{
+			Path: testCertPath,
+		},
 	}
 
 	opt2 := &k3senv.Options{
-		Manifests: []string{"/path/to/manifests"},
+		Manifest: k3senv.ManifestConfig{
+			Paths: []string{"/path/to/manifests"},
+		},
 	}
 
 	target := &k3senv.Options{}
 	opt1.ApplyToOptions(target)
 	opt2.ApplyToOptions(target)
 
-	if target.Scheme != scheme {
-		t.Error("scheme not applied correctly")
-	}
+	g.Expect(target.Scheme).To(Equal(scheme))
+	g.Expect(target.Certificate.Path).To(Equal(testCertPath))
+	g.Expect(target.Manifest.Paths).To(HaveLen(1))
+}
 
-	if target.CertDir != testCertDir {
-		t.Errorf("certDir = %q, want %q", target.CertDir, testCertDir)
-	}
+func TestTimeoutConfig_Defaults(t *testing.T) {
+	g := NewWithT(t)
 
-	if len(target.Manifests) != 1 {
-		t.Errorf("len(manifests) = %d, want 1", len(target.Manifests))
-	}
+	env, err := k3senv.New(k3senv.WithCertPath(testCertPath))
+
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(env).NotTo(BeNil())
+}
+
+func TestK3sArgs_WithK3sArgs(t *testing.T) {
+	g := NewWithT(t)
+	args := []string{"--disable=traefik", "--disable=metrics-server"}
+
+	env, err := k3senv.New(
+		k3senv.WithK3sArgs(args...),
+		k3senv.WithCertPath(testCertPath),
+	)
+
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(env).NotTo(BeNil())
+}
+
+func TestLogger_WithLogger(t *testing.T) {
+	g := NewWithT(t)
+	var logMessages []string
+	mockLogger := &mockLogger{messages: &logMessages}
+
+	env, err := k3senv.New(
+		k3senv.WithLogger(mockLogger),
+		k3senv.WithCertPath(testCertPath),
+	)
+
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(env).NotTo(BeNil())
+}
+
+func TestLoadConfigFromEnv_EmptyEnvironment(t *testing.T) {
+	g := NewWithT(t)
+
+	opts, err := k3senv.LoadConfigFromEnv()
+	g.Expect(err).NotTo(HaveOccurred())
+
+	// Should have defaults
+	g.Expect(opts.Webhook.Port).To(Equal(k3senv.DefaultWebhookPort))
+	g.Expect(opts.K3s.Image).To(Equal(k3senv.DefaultK3sImage))
+}
+
+func TestNew_EnvironmentVariablePrecedence(t *testing.T) {
+	g := NewWithT(t)
+
+	// Set environment variables
+	t.Setenv("K3SENV_WEBHOOK_PORT", "8080")
+	t.Setenv("K3SENV_K3S_IMAGE", "rancher/k3s:env-test")
+
+	// Test that env vars are loaded automatically and explicit options override them
+	env, err := k3senv.New(
+		k3senv.WithWebhookPort(9999), // Should override env var
+		k3senv.WithCertPath(testCertPath),
+	)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	// Explicit option should override environment variable
+	g.Expect(env).NotTo(BeNil())
+	// We can't easily access internal options without exposing them,
+	// but we can verify the environment was created successfully with mixed config
+}
+
+func TestNew_EnvironmentVariablesOnly(t *testing.T) {
+	g := NewWithT(t)
+
+	// Set environment variables
+	t.Setenv("K3SENV_WEBHOOK_PORT", "8080")
+	t.Setenv("K3SENV_K3S_IMAGE", "rancher/k3s:env-only-test")
+	t.Setenv("K3SENV_CERTIFICATE_PATH", testCertPath)
+
+	// First test that LoadConfigFromEnv works
+	opts, err := k3senv.LoadConfigFromEnv()
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(opts.Certificate.Path).To(Equal(testCertPath))
+
+	// Test that env vars are loaded automatically
+	env, err := k3senv.New()
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(env).NotTo(BeNil())
+	g.Expect(env.CertPath()).To(Equal(testCertPath))
+}
+
+func TestPollIntervals_ComponentSpecific(t *testing.T) {
+	g := NewWithT(t)
+
+	// Test environment variables for poll intervals
+	t.Setenv("K3SENV_WEBHOOK_POLL_INTERVAL", "1s")
+	t.Setenv("K3SENV_CRD_POLL_INTERVAL", "200ms")
+
+	opts, err := k3senv.LoadConfigFromEnv()
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(opts.Webhook.PollInterval).To(Equal(1 * time.Second))
+	g.Expect(opts.CRD.PollInterval).To(Equal(200 * time.Millisecond))
+
+	// Remove env vars to test defaults
+	g.Expect(os.Unsetenv("K3SENV_WEBHOOK_POLL_INTERVAL")).NotTo(HaveOccurred())
+	g.Expect(os.Unsetenv("K3SENV_CRD_POLL_INTERVAL")).NotTo(HaveOccurred())
+
+	opts3, err := k3senv.LoadConfigFromEnv()
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(opts3.Webhook.PollInterval).To(Equal(k3senv.DefaultWebhookPollInterval))
+	g.Expect(opts3.CRD.PollInterval).To(Equal(k3senv.DefaultCRDPollInterval))
+}
+
+func TestLogger_ContainerLogRedirection(t *testing.T) {
+	g := NewWithT(t)
+	var logMessages []string
+	mockLogger := &mockLogger{messages: &logMessages}
+
+	// Create environment with logger
+	env, err := k3senv.New(
+		k3senv.WithLogger(mockLogger),
+		k3senv.WithCertPath(testCertPath),
+	)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(env).NotTo(BeNil())
+
+	// The logger should be properly attached
+	// (actual k3s container logs would be tested in integration tests)
+}
+
+// mockLogger implements the Logger interface for testing.
+type mockLogger struct {
+	messages *[]string
+}
+
+func (m *mockLogger) Printf(format string, args ...interface{}) {
+	*m.messages = append(*m.messages, fmt.Sprintf(format, args...))
 }

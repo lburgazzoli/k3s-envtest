@@ -8,6 +8,7 @@ LINT_TIMEOUT := 10m
 ## Tools
 GOLANGCI_VERSION ?= v2.5.0
 GOLANGCI ?= go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
+GOVULNCHECK ?= go run golang.org/x/vuln/cmd/govulncheck@latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -63,6 +64,10 @@ lint:
 .PHONY: lint/fix
 lint/fix:
 	@$(GOLANGCI) run --config .golangci.yml --timeout $(LINT_TIMEOUT) --fix
+
+.PHONY: vuln
+vuln:
+	@$(GOVULNCHECK) ./...
 
 LOCALBIN ?= $(shell pwd)/bin
 $(LOCALBIN):

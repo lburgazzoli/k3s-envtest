@@ -12,6 +12,19 @@ This library was extracted from the opendatahub-operator project and made indepe
 - Proper Kubernetes YAML parsing using gopkg.in/yaml.v3 + runtime.Decoder
 - Clean separation from original codebase
 
+## Recent Improvements (2024)
+
+Recent architectural enhancements include:
+- **Structured Configuration System** - Replaced flat Options with logical groupings (WebhookConfig, CRDConfig, K3sConfig, etc.)
+- **Environment Variable Support** - Added Viper-based configuration with K3SENV_ prefix using mapstructure tags
+- **Simplified K3sEnv Architecture** - Eliminated field duplication by using single Options struct directly
+- **Centralized Default Options** - Created NewDefaultOptions() function in k3senv_opts.go for better organization
+- **Enhanced Testing Framework** - Converted all tests to vanilla Gomega with dot imports for better readability
+- **Custom K3s Arguments** - Added support for custom k3s server arguments via WithK3sArgs()
+- **Component-Specific Polling** - Separate PollInterval configuration for CRD (100ms) and Webhook (500ms) components
+- **Container Log Redirection** - Forward k3s container logs to configurable Logger interface with [k3s] prefix
+- **Structured Logging Interface** - Logger interface compatible with testing.T and debugging support
+
 **Note:** Tests require Docker to be running as they spin up k3s containers using testcontainers-go.
 
 ## Development Commands
@@ -86,8 +99,9 @@ internal/
 **K3sEnv** - Main test environment that:
 - Spins up a k3s container using testcontainers-go
 - Loads Kubernetes manifests from directories (YAML files)
-- Installs CRDs and webhook configurations
+- Installs CRDs and webhook configurations with component-specific polling intervals
 - Provides webhook server setup with auto-generated TLS certificates
+- Redirects container logs to configurable Logger interface
 - Manages environment lifecycle (Start/Stop)
 
 **Manifest Loading** - Loads pre-rendered YAML manifests from directories:
@@ -108,6 +122,7 @@ internal/
 
 #### Basic Setup
 ```go
+// Environment variables (K3SENV_*) are automatically loaded
 env, err := k3senv.New(
     k3senv.WithManifestDir("testdata/manifests"),
     k3senv.WithAutoInstallWebhooks(true),
@@ -180,9 +195,31 @@ go func() {
 6. **Proper YAML Parsing** - Uses gopkg.in/yaml.v3 + runtime.Decoder instead of fragile string splitting on `---`
 7. **JQ Transforms** - Uses github.com/itchyny/gojq for elegant webhook configuration patching
 
+### Configuration System
+
+The library now uses a structured configuration approach with logical groupings:
+
+**Configuration Types:**
+- `WebhookConfig` - Webhook port, auto-install, timeouts (ready, health check), polling interval (500ms default)
+- `CRDConfig` - CRD establishment timeout and polling interval configuration (100ms default)
+- `K3sConfig` - K3s container image and server arguments
+- `CertificateConfig` - Certificate directory and validity settings
+- `ManifestConfig` - Manifest paths and runtime objects
+
+**Configuration Methods:**
+1. **Functional Options Pattern** - `k3senv.WithWebhookPort(9443)`, `k3senv.WithK3sArgs("--disable=traefik")`
+2. **Structured Options** - Direct `&k3senv.Options{Webhook: k3senv.WebhookConfig{Port: 9443}}`  
+3. **Environment Variables** - `K3SENV_WEBHOOK_PORT=9443` using Viper + mapstructure (automatically loaded)
+
+**Environment Variable Format:**
+- Prefix: `K3SENV_`
+- Nested config: `K3SENV_WEBHOOK_PORT`, `K3SENV_K3S_IMAGE`, `K3SENV_CERTIFICATE_PATH`
+- Polling intervals: `K3SENV_WEBHOOK_POLL_INTERVAL`, `K3SENV_CRD_POLL_INTERVAL`
+- Automatically loaded by `k3senv.New()` - explicit options override environment variables
+
 ### Dependencies
 
-**Direct Dependencies (10):**
+**Direct Dependencies (11):**
 - `github.com/testcontainers/testcontainers-go/modules/k3s` - K3s container management
 - `sigs.k8s.io/controller-runtime` - Kubernetes client and webhook server
 - `k8s.io/apimachinery` - Kubernetes type system
@@ -192,42 +229,123 @@ go func() {
 - `github.com/mdelapenya/tlscert` - TLS certificate generation
 - `gopkg.in/yaml.v3` - Multi-document YAML parsing
 - `github.com/onsi/gomega` - Testing assertions
+- `github.com/spf13/viper` - Configuration management
+- `github.com/go-viper/mapstructure/v2` - Struct field mapping (added with Viper)
 
 **Total Dependencies:** ~105 (expected for Kubernetes ecosystem due to controller-runtime)
 
 ### Common Patterns
 
-**Testing with CRDs:**
-```go
-func TestMyController(t *testing.T) {
-    env, err := k3senv.New(k3senv.WithManifestDir("testdata/crds"))
-    require.NoError(t, err)
+**Modern Testing with Gomega (Recommended):**
+All tests now use vanilla Gomega with dot imports for better readability:
 
-    require.NoError(t, env.Start(context.Background()))
-    defer env.Stop(context.Background())
+```go
+import . "github.com/onsi/gomega"
+
+func TestMyController(t *testing.T) {
+    g := NewWithT(t)
+    ctx := context.Background()
+    
+    env, err := k3senv.New(
+        k3senv.WithLogger(t), // Enable debug logging
+        k3senv.WithManifests("testdata/crds"),
+    )
+    g.Expect(err).NotTo(HaveOccurred())
+
+    g.Expect(env.Start(ctx)).To(Succeed())
+    defer env.Stop(ctx)
 
     // CRDs are now installed and established
-    // Use env.Client() to create custom resources
+    client := env.Client()
+    g.Expect(client).NotTo(BeNil())
 }
 ```
 
 **Testing with Webhooks:**
 ```go
 func TestMyWebhook(t *testing.T) {
+    g := NewWithT(t)
+    ctx := context.Background()
+    
     env, err := k3senv.New(
-        k3senv.WithManifestDir("testdata/webhooks"),
+        k3senv.WithLogger(t),
+        k3senv.WithManifests("testdata/webhooks"),
         k3senv.WithAutoInstallWebhooks(true),
     )
-    require.NoError(t, err)
+    g.Expect(err).NotTo(HaveOccurred())
 
     // Start webhook server
     srv := env.WebhookServer()
     srv.Register("/validate", myWebhookHandler)
-    go srv.Start(context.Background())
+    go func() {
+        defer GinkgoRecover()
+        _ = srv.Start(ctx)
+    }()
 
-    require.NoError(t, env.Start(context.Background()))
-    defer env.Stop(context.Background())
+    g.Expect(env.Start(ctx)).To(Succeed())
+    defer env.Stop(ctx)
 
     // Webhooks are now active and configured
 }
 ```
+
+**Environment Configuration Testing:**
+```go
+func TestWithEnvConfig(t *testing.T) {
+    g := NewWithT(t)
+    
+    // Test environment variable configuration
+    opts, err := k3senv.LoadConfigFromEnv()
+    g.Expect(err).NotTo(HaveOccurred())
+    g.Expect(opts.Webhook.Port).To(Equal(k3senv.DefaultWebhookPort))
+    
+    // Environment variables are automatically loaded
+    env, err := k3senv.New(
+        k3senv.WithLogger(t),
+        k3senv.WithManifests("testdata/extra"),
+    )
+    g.Expect(err).NotTo(HaveOccurred())
+}
+```
+
+**Structured Configuration Testing:**
+```go
+func TestStructuredConfig(t *testing.T) {
+    g := NewWithT(t)
+    
+    env, err := k3senv.New(&k3senv.Options{
+        Webhook: k3senv.WebhookConfig{
+            Port: 9443,
+            AutoInstall: true,
+        },
+        K3s: k3senv.K3sConfig{
+            Image: "rancher/k3s:latest",
+            Args: []string{"--disable=traefik"},
+        },
+        Certificate: k3senv.CertificateConfig{
+            Dir: t.TempDir(),
+        },
+    })
+    g.Expect(err).NotTo(HaveOccurred())
+    g.Expect(env).NotTo(BeNil())
+}
+```
+
+## Architecture & Design
+
+For detailed information about architectural decisions, design patterns, and implementation details, see:
+- **[README.md](README.md)** - User documentation and examples
+- **[docs/architecture.md](docs/architecture.md)** - Architectural decisions and design rationale
+
+## Key Files
+
+**Main Package (`pkg/k3senv/`):**
+- `k3senv.go` - Core K3sEnv struct and lifecycle management
+- `k3senv_opts.go` - Configuration system, options, and environment variable support
+- `k3senv_support.go` - Certificate generation, manifest loading, and JQ transforms
+- `k3senv_*_test.go` - Comprehensive test suite using Gomega
+
+**Internal Packages:**
+- `internal/gvk/` - GroupVersionKind constants for resource identification
+- `internal/resources/` - Resource conversion and manipulation utilities  
+- `internal/testutil/` - Test utility functions for project root detection

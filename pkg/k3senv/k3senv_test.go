@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"k8s.io/client-go/tools/clientcmd"
-
 	"github.com/lburgazzoli/k3s-envtest/pkg/k3senv"
+
+	"k8s.io/client-go/tools/clientcmd"
 
 	. "github.com/onsi/gomega"
 )
@@ -15,7 +15,7 @@ func TestK3sEnv_GetKubeconfig_Success(t *testing.T) {
 	g := NewWithT(t)
 	ctx := context.Background()
 
-	env, err := k3senv.New(k3senv.WithCertDir(t.TempDir()))
+	env, err := k3senv.New(k3senv.WithCertPath(t.TempDir()))
 	g.Expect(err).ShouldNot(HaveOccurred())
 
 	err = env.Start(ctx)
@@ -52,7 +52,7 @@ func TestK3sEnv_GetKubeconfig_MatchesConfig(t *testing.T) {
 	g := NewWithT(t)
 	ctx := context.Background()
 
-	env, err := k3senv.New(k3senv.WithCertDir(t.TempDir()))
+	env, err := k3senv.New(k3senv.WithCertPath(t.TempDir()))
 	g.Expect(err).ShouldNot(HaveOccurred())
 
 	err = env.Start(ctx)

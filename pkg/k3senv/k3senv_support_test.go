@@ -4,11 +4,10 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/lburgazzoli/k3s-envtest/pkg/k3senv"
 	sigsyaml "sigs.k8s.io/yaml"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-
-	"github.com/lburgazzoli/k3s-envtest/pkg/k3senv"
 
 	. "github.com/onsi/gomega"
 )
