@@ -1,6 +1,7 @@
 package k3senv
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
@@ -12,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/itchyny/gojq"
 	"github.com/lburgazzoli/k3s-envtest/internal/gvk"
+	"github.com/lburgazzoli/k3s-envtest/internal/jq"
 	"github.com/lburgazzoli/k3s-envtest/internal/resources"
 	"github.com/lburgazzoli/k3s-envtest/internal/testutil"
 	"github.com/mdelapenya/tlscert"
@@ -23,7 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 type CertData struct {
@@ -136,12 +137,16 @@ func determineConvertibleCRDs(
 	return convertibleCRDs, nil
 }
 
-func (e *K3sEnv) checkWebhookHealth(
+// checkWebhookEndpoint performs a POST request to an HTTPS endpoint with a minimal AdmissionReview body.
+// Returns an error if the endpoint is unreachable or returns a 5xx status code.
+// Accepts 4xx responses since webhooks may reject the test payload but are still healthy.
+func checkWebhookEndpoint(
 	ctx context.Context,
-	hostPort string,
+	url string,
+	timeout time.Duration,
 ) error {
-	client := &http.Client{
-		Timeout: e.options.Webhook.HealthCheckTimeout,
+	c := &http.Client{
+		Timeout: timeout,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
 				//nolint:gosec
@@ -150,52 +155,93 @@ func (e *K3sEnv) checkWebhookHealth(
 		},
 	}
 
-	url := fmt.Sprintf("https://%s/", hostPort)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	// Minimal AdmissionReview request for health check.
+	// Webhooks expect POST with AdmissionReview body.
+	body := []byte(`{
+		"apiVersion": "admission.k8s.io/v1",
+		"kind": "AdmissionReview",
+		"request": {
+			"uid": "00000000-0000-0000-0000-000000000000",
+			"operation": "CREATE",
+			"object": {}
+		}
+	}`)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := client.Do(req)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to connect to webhook server: %w", err)
+		return fmt.Errorf("failed to connect: %w", err)
 	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
 
+	// Accept 2xx, 3xx, and 4xx status codes.
+	// 4xx means webhook is responding but rejected our test payload (still healthy).
+	// Only fail on 5xx (server errors).
 	if resp.StatusCode >= 500 {
-		return fmt.Errorf("webhook server returned error status: %d", resp.StatusCode)
+		return fmt.Errorf("returned error status: %d", resp.StatusCode)
 	}
 
 	return nil
 }
 
-func ApplyJQTransform(
-	obj *unstructured.Unstructured,
-	expression string,
-	args ...interface{},
+func (e *K3sEnv) waitForWebhookEndpointsReady(
+	ctx context.Context,
+	webhookConfig *unstructured.Unstructured,
+	port int,
 ) error {
-	query, err := gojq.Parse(fmt.Sprintf(expression, args...))
+	// Extract webhook endpoint URLs from the configuration using JQ
+	webhookURLs, err := jq.QuerySlice[string](webhookConfig, `[.webhooks[].clientConfig.url]`)
 	if err != nil {
-		return fmt.Errorf("failed to parse jq expression: %w", err)
+		return fmt.Errorf("failed to extract webhook URLs: %w", err)
 	}
 
-	result, ok := query.Run(obj.Object).Next()
-	if !ok || result == nil {
+	if len(webhookURLs) == 0 {
+		e.debugf("No webhook endpoints found in config %s, skipping health check", webhookConfig.GetName())
 		return nil
 	}
 
-	if err, ok := result.(error); ok {
-		return fmt.Errorf("jq execution error: %w", err)
-	}
+	e.debugf("Checking %d webhook endpoints for %s...", len(webhookURLs), webhookConfig.GetName())
 
-	transformed, ok := result.(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("expected map[string]interface{}, got %T", result)
-	}
+	// Check each webhook endpoint
+	for _, webhookURL := range webhookURLs {
+		// Parse the URL to extract the path
+		// The URL format is https://host:port/path
+		// We need to replace host:port with 127.0.0.1:port since webhook server runs on host
+		var endpointPath string
+		if idx := strings.Index(webhookURL, "://"); idx != -1 {
+			// Skip scheme
+			remaining := webhookURL[idx+3:]
+			// Find the path part (after host:port)
+			if pathIdx := strings.Index(remaining, "/"); pathIdx != -1 {
+				endpointPath = remaining[pathIdx:]
+			} else {
+				endpointPath = "/"
+			}
+		} else {
+			endpointPath = "/"
+		}
 
-	obj.SetUnstructuredContent(transformed)
+		localURL := fmt.Sprintf("https://127.0.0.1:%d%s", port, endpointPath)
+		e.debugf("Checking webhook endpoint: %s (local: %s)", webhookURL, localURL)
+
+		err := wait.PollUntilContextTimeout(ctx, e.options.Webhook.PollInterval, e.options.Webhook.ReadyTimeout, true, func(ctx context.Context) (bool, error) {
+			return checkWebhookEndpoint(ctx, localURL, e.options.Webhook.HealthCheckTimeout) == nil, nil
+		})
+
+		if err != nil {
+			return fmt.Errorf("webhook endpoint %s not ready: %w", endpointPath, err)
+		}
+
+		e.debugf("Webhook endpoint %s is ready", endpointPath)
+	}
 
 	return nil
 }
@@ -209,17 +255,14 @@ func extractNames(objs []unstructured.Unstructured) []string {
 }
 
 func loadManifestFromFile(
-	scheme *runtime.Scheme,
 	filePath string,
 ) ([]unstructured.Unstructured, error) {
-	decoder := serializer.NewCodecFactory(scheme).UniversalDeserializer()
-
 	data, err := readFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file %s: %w", filePath, err)
 	}
 
-	manifests, err := resources.Decode(decoder, data)
+	manifests, err := resources.Decode(data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode YAML from %s: %w", filePath, err)
 	}
@@ -238,7 +281,6 @@ func loadManifestFromFile(
 }
 
 func loadManifestsFromDirFlat(
-	scheme *runtime.Scheme,
 	dir string,
 ) ([]unstructured.Unstructured, error) {
 	entries, err := os.ReadDir(dir)
@@ -259,7 +301,7 @@ func loadManifestsFromDirFlat(
 		}
 
 		filePath := filepath.Join(dir, fileName)
-		manifests, err := loadManifestFromFile(scheme, filePath)
+		manifests, err := loadManifestFromFile(filePath)
 		if err != nil {
 			return nil, err
 		}
@@ -270,7 +312,6 @@ func loadManifestsFromDirFlat(
 }
 
 func loadManifestPath(
-	scheme *runtime.Scheme,
 	path string,
 ) ([]unstructured.Unstructured, error) {
 	info, err := os.Stat(path)
@@ -282,10 +323,10 @@ func loadManifestPath(
 	}
 
 	if info.IsDir() {
-		return loadManifestsFromDirFlat(scheme, path)
+		return loadManifestsFromDirFlat(path)
 	}
 
-	return loadManifestFromFile(scheme, path)
+	return loadManifestFromFile(path)
 }
 
 func loadObjectsToManifests(
@@ -310,7 +351,6 @@ func loadObjectsToManifests(
 }
 
 func loadManifestsFromPaths(
-	scheme *runtime.Scheme,
 	paths []string,
 ) ([]unstructured.Unstructured, error) {
 	var result []unstructured.Unstructured
@@ -335,14 +375,14 @@ func loadManifestsFromPaths(
 			}
 
 			for _, match := range matches {
-				manifests, err := loadManifestPath(scheme, match)
+				manifests, err := loadManifestPath(match)
 				if err != nil {
 					return nil, err
 				}
 				result = append(result, manifests...)
 			}
 		} else {
-			manifests, err := loadManifestPath(scheme, resolvedPath)
+			manifests, err := loadManifestPath(resolvedPath)
 			if err != nil {
 				return nil, err
 			}

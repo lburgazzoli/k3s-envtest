@@ -24,6 +24,7 @@ Recent architectural enhancements include:
 - **Component-Specific Polling** - Separate PollInterval configuration for CRD (100ms) and Webhook (500ms) components
 - **Container Log Redirection** - Forward k3s container logs to configurable Logger interface with [k3s] prefix
 - **Structured Logging Interface** - Logger interface compatible with testing.T and debugging support
+- **Generic JQ Functions** - Type-safe JQ queries (QueryTyped[T], QuerySlice[T], QueryMap[K,V]) reduce boilerplate by 70%
 
 **Note:** Tests require Docker to be running as they spin up k3s containers using testcontainers-go.
 
@@ -347,5 +348,75 @@ For detailed information about architectural decisions, design patterns, and imp
 
 **Internal Packages:**
 - `internal/gvk/` - GroupVersionKind constants for resource identification
-- `internal/resources/` - Resource conversion and manipulation utilities  
+- `internal/jq/` - JQ transformation and query utilities with generic type-safe functions
+- `internal/resources/` - Resource conversion and manipulation utilities
 - `internal/testutil/` - Test utility functions for project root detection
+
+### JQ Transformation Utilities (`internal/jq`)
+
+The `internal/jq` package provides utilities for transforming and querying Kubernetes unstructured objects using JQ expressions.
+
+**Available Functions:**
+
+1. **`Transform(obj, expression, args...)`** - Mutates object in place with JQ transformation
+2. **`Query(obj, expression, args...)`** - Returns raw `interface{}` result (for dynamic types)
+3. **`QueryTyped[T](obj, expression, args...)`** - Returns typed single value (generic)
+4. **`QuerySlice[T](obj, expression, args...)`** - Returns typed slice (generic)
+5. **`QueryMap[K, V](obj, expression, args...)`** - Returns typed map (generic)
+
+**When to Use Each:**
+
+- Use **`Transform`** when modifying objects (webhook configs, CRDs)
+- Use **`Query`** when you need dynamic type handling or complex nested structures
+- Use **`QueryTyped[T]`** when extracting a single value of known type
+- Use **`QuerySlice[T]`** when extracting arrays of known element type
+- Use **`QueryMap[K,V]`** when extracting maps with known key/value types
+
+**Examples:**
+
+```go
+import "github.com/lburgazzoli/k3s-envtest/internal/jq"
+
+// Extract a single string value
+name, err := jq.QueryTyped[string](obj, `.metadata.name`)
+
+// Extract a boolean
+enabled, err := jq.QueryTyped[bool](obj, `.spec.enabled`)
+
+// Extract a slice of strings (e.g., webhook URLs)
+urls, err := jq.QuerySlice[string](obj, `[.webhooks[].clientConfig.url]`)
+
+// Extract a slice of numbers (JSON numbers are float64)
+ports, err := jq.QuerySlice[float64](obj, `[.spec.ports[].port]`)
+
+// Extract a map
+labels, err := jq.QueryMap[string, string](obj, `.metadata.labels`)
+
+// Transform an object in place
+err := jq.Transform(obj, `.spec.replicas = %d`, 3)
+
+// Complex transformation with JQ expression
+err := jq.Transform(webhookConfig, `
+    .webhooks |= map(
+        .clientConfig.url = "%s" + (.clientConfig.service.path // "/") |
+        .clientConfig.caBundle = "%s" |
+        del(.clientConfig.service)
+    )
+`, baseURL, caBundle)
+```
+
+**Benefits of Generic Functions:**
+
+- **Type Safety**: Compile-time type checking for expected return types
+- **Reduced Boilerplate**: Eliminates manual type assertions (14 lines → 3 lines for common cases)
+- **Better Error Messages**: Clear type mismatch errors with expected vs actual types
+- **IDE Support**: Better autocompletion and type inference
+
+**Error Handling:**
+
+All JQ functions return errors for:
+- Invalid JQ expressions (parse errors)
+- JQ execution errors (runtime errors)
+- Type mismatches (when using generic functions)
+
+Returning `nil` result with `nil` error is valid and indicates the JQ query found no matching data.

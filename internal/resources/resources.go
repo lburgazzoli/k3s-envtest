@@ -28,6 +28,17 @@ func ToUnstructured(obj any) (*unstructured.Unstructured, error) {
 	return &u, nil
 }
 
+// YAMLToUnstructured converts a YAML string to an unstructured object.
+// This is useful for testing purposes.
+func YAMLToUnstructured(yamlStr string) (*unstructured.Unstructured, error) {
+	var data map[string]interface{}
+	if err := yaml.Unmarshal([]byte(yamlStr), &data); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal yaml: %w", err)
+	}
+
+	return &unstructured.Unstructured{Object: data}, nil
+}
+
 func GetGroupVersionKindForObject(
 	s *runtime.Scheme,
 	obj runtime.Object,
@@ -72,10 +83,7 @@ func FormatObjectReference(u client.Object) string {
 	return gvk + " " + name
 }
 
-func Decode(
-	decoder runtime.Decoder,
-	content []byte,
-) ([]unstructured.Unstructured, error) {
+func Decode(content []byte) ([]unstructured.Unstructured, error) {
 	results := make([]unstructured.Unstructured, 0)
 
 	r := bytes.NewReader(content)
@@ -101,22 +109,12 @@ func Decode(
 			continue
 		}
 
-		encoded, err := yaml.Marshal(out)
+		obj, err := ToUnstructured(&out)
 		if err != nil {
-			return nil, fmt.Errorf("unable to marshal resource: %w", err)
+			return nil, fmt.Errorf("unable to convert to unstructured: %w", err)
 		}
 
-		var obj unstructured.Unstructured
-
-		if _, _, err = decoder.Decode(encoded, nil, &obj); err != nil {
-			if runtime.IsMissingKind(err) {
-				continue
-			}
-
-			return nil, fmt.Errorf("unable to decode resource: %w", err)
-		}
-
-		results = append(results, obj)
+		results = append(results, *obj)
 	}
 
 	return results, nil

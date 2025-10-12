@@ -12,10 +12,11 @@ import (
 )
 
 const (
-	DefaultK3sImage      = "rancher/k3s:v1.32.9-k3s1"
-	DefaultWebhookPort   = 9443
-	DefaultCertDirPrefix = "/tmp/k3senv-certs-"
-	DefaultCertValidity  = 24 * time.Hour
+	DefaultK3sImage          = "rancher/k3s:v1.32.9-k3s1"
+	DefaultK3sLogRedirection = false
+	DefaultWebhookPort       = 9443
+	DefaultCertDirPrefix     = "/tmp/k3senv-certs-"
+	DefaultCertValidity      = 24 * time.Hour
 
 	DefaultWebhookPollInterval = 500 * time.Millisecond
 	DefaultCRDPollInterval     = 100 * time.Millisecond
@@ -50,8 +51,9 @@ type CRDConfig struct {
 
 // K3sConfig groups all k3s-related configuration.
 type K3sConfig struct {
-	Image string   `mapstructure:"image"`
-	Args  []string `mapstructure:"args"`
+	Image          string   `mapstructure:"image"`
+	Args           []string `mapstructure:"args"`
+	LogRedirection bool     `mapstructure:"log_redirection"`
 }
 
 // CertificateConfig groups all certificate-related configuration.
@@ -119,6 +121,9 @@ func (o *Options) ApplyToOptions(target *Options) {
 	}
 	if len(o.K3s.Args) > 0 {
 		target.K3s.Args = append(target.K3s.Args, o.K3s.Args...)
+	}
+	if o.K3s.LogRedirection {
+		target.K3s.LogRedirection = o.K3s.LogRedirection
 	}
 
 	// Certificate config
@@ -241,6 +246,18 @@ func (k *K3sArgs) ApplyToOptions(o *Options) {
 	o.K3s.Args = append(o.K3s.Args, k.args...)
 }
 
+type K3sLogRedirection struct {
+	enable bool
+}
+
+func WithK3sLogRedirection(enable bool) Option {
+	return &K3sLogRedirection{enable: enable}
+}
+
+func (k *K3sLogRedirection) ApplyToOptions(o *Options) {
+	o.K3s.LogRedirection = k.enable
+}
+
 type CertValidity struct {
 	duration time.Duration
 }
@@ -287,6 +304,7 @@ func LoadConfigFromEnv() (*Options, error) {
 	v.SetDefault("crd.poll_interval", DefaultCRDPollInterval)
 	v.SetDefault("k3s.image", DefaultK3sImage)
 	v.SetDefault("k3s.args", []string{})
+	v.SetDefault("k3s.log_redirection", DefaultK3sLogRedirection)
 	v.SetDefault("certificate.path", "")
 	v.SetDefault("certificate.validity", DefaultCertValidity)
 	v.SetDefault("manifest.paths", []string{})

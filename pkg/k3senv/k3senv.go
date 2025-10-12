@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/lburgazzoli/k3s-envtest/internal/gvk"
+	"github.com/lburgazzoli/k3s-envtest/internal/jq"
 	"github.com/lburgazzoli/k3s-envtest/internal/resources"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/k3s"
@@ -76,7 +77,6 @@ type K3sEnv struct {
 	options Options
 
 	certData      *CertData
-	webhookHost   string
 	manifests     []unstructured.Unstructured
 	teardownTasks []TeardownTask
 }
@@ -243,27 +243,7 @@ func (e *K3sEnv) WebhookConfigs() []unstructured.Unstructured {
 }
 
 func (e *K3sEnv) GetWebhookHost(ctx context.Context) (string, error) {
-	if e.webhookHost != "" {
-		return e.webhookHost, nil
-	}
-
-	if e.container == nil {
-		return "", errors.New("container not initialized")
-	}
-
-	inspect, err := e.container.Inspect(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to inspect container: %w", err)
-	}
-
-	for _, network := range inspect.NetworkSettings.Networks {
-		if network.Gateway != "" {
-			e.webhookHost = net.JoinHostPort(network.Gateway, strconv.Itoa(e.options.Webhook.Port))
-			return e.webhookHost, nil
-		}
-	}
-
-	return "", errors.New("no gateway IP found in container network settings")
+	return net.JoinHostPort("host.testcontainers.internal", strconv.Itoa(e.options.Webhook.Port)), nil
 }
 
 func (e *K3sEnv) WebhookServer() ctrlwebhook.Server {
@@ -299,6 +279,11 @@ func (e *K3sEnv) InstallWebhooks(ctx context.Context) error {
 		if err := e.cli.Create(ctx, wh); err != nil {
 			return fmt.Errorf("failed to create webhook config %s: %w", wh.GetName(), err)
 		}
+
+		// Check that the webhook endpoints are responding
+		if err := e.waitForWebhookEndpointsReady(ctx, wh, e.options.Webhook.Port); err != nil {
+			return fmt.Errorf("webhook config %s endpoints not ready: %w", wh.GetName(), err)
+		}
 	}
 
 	crds := e.CRDs()
@@ -317,7 +302,7 @@ func (e *K3sEnv) InstallWebhooks(ctx context.Context) error {
 		}
 	}
 
-	return e.waitForWebhooksReady(ctx, webhookHostPort)
+	return nil
 }
 
 func (e *K3sEnv) CreateCRD(
@@ -335,7 +320,9 @@ func (e *K3sEnv) CreateCRD(
 }
 
 func (e *K3sEnv) startK3sContainer(ctx context.Context) error {
-	var opts []testcontainers.ContainerCustomizer
+	opts := []testcontainers.ContainerCustomizer{
+		testcontainers.WithHostPortAccess(e.options.Webhook.Port),
+	}
 
 	// If custom k3s arguments are provided, modify the container command
 	if len(e.options.K3s.Args) > 0 {
@@ -347,7 +334,7 @@ func (e *K3sEnv) startK3sContainer(ctx context.Context) error {
 	}
 
 	// Add log consumer to forward container logs to k3senv Logger
-	if e.options.Logger != nil {
+	if e.options.K3s.LogRedirection && e.options.Logger != nil {
 		opts = append(opts, testcontainers.WithLogConsumers(&loggerConsumer{
 			logger: e.options.Logger,
 		}))
@@ -414,7 +401,7 @@ func (e *K3sEnv) prepareManifests() error {
 	e.manifests = []unstructured.Unstructured{}
 
 	if len(e.options.Manifest.Paths) > 0 {
-		manifests, err := loadManifestsFromPaths(e.options.Scheme, e.options.Manifest.Paths)
+		manifests, err := loadManifestsFromPaths(e.options.Manifest.Paths)
 		if err != nil {
 			return fmt.Errorf("failed to load manifests from paths: %w", err)
 		}
@@ -464,7 +451,7 @@ func (e *K3sEnv) patchAndUpdateCRDConversions(
 			return fmt.Errorf("failed to get CRD %s: %w", crd.GetName(), err)
 		}
 
-		err := ApplyJQTransform(
+		err := jq.Transform(
 			crd, `
 			.spec.conversion = {
 				"strategy": "Webhook",
@@ -512,6 +499,8 @@ func (e *K3sEnv) waitForCRDsEstablished(
 	e.debugf("Waiting for CRDs to be established...")
 
 	for _, crdName := range crdNames {
+		e.debugf("Checking CRD: %s", crdName)
+
 		err := wait.PollUntilContextTimeout(ctx, e.options.CRD.PollInterval, e.options.CRD.ReadyTimeout, true, func(ctx context.Context) (bool, error) {
 			obj := &apiextensionsv1.CustomResourceDefinition{}
 			err := e.cli.Get(ctx, client.ObjectKey{Name: crdName}, obj)
@@ -524,6 +513,7 @@ func (e *K3sEnv) waitForCRDsEstablished(
 
 			for _, condition := range obj.Status.Conditions {
 				if condition.Type == apiextensionsv1.Established && condition.Status == apiextensionsv1.ConditionTrue {
+					e.debugf("CRD %s is now active", crdName)
 					return true, nil
 				}
 			}
@@ -549,7 +539,7 @@ func (e *K3sEnv) patchWebhookConfigurations(
 	for i := range webhookConfigs {
 		wh := &webhookConfigs[i]
 
-		err := ApplyJQTransform(wh, `
+		err := jq.Transform(wh, `
 			.webhooks |= map(
 				.clientConfig.url = "%s" + (.clientConfig.service.path // "/") |
 				.clientConfig.caBundle = "%s" |
@@ -563,28 +553,6 @@ func (e *K3sEnv) patchWebhookConfigurations(
 	}
 
 	return webhookConfigs, nil
-}
-
-func (e *K3sEnv) waitForWebhooksReady(
-	ctx context.Context,
-	hostPort string,
-) error {
-	e.debugf("Waiting for webhooks to be ready...")
-
-	err := wait.PollUntilContextTimeout(ctx, e.options.Webhook.PollInterval, e.options.Webhook.ReadyTimeout, true, func(ctx context.Context) (bool, error) {
-		err := e.checkWebhookHealth(ctx, hostPort)
-		if err != nil {
-			e.debugf("Webhook %s is not ready: %v", hostPort, err)
-		}
-
-		return err == nil, nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("webhook %s not ready: %w", hostPort, err)
-	}
-
-	return nil
 }
 
 // debugf logs a debug message if a logger is configured.
