@@ -509,6 +509,8 @@ func (e *K3sEnv) waitForCRDsEstablished(
 	ctx context.Context,
 	crdNames []string,
 ) error {
+	e.debugf("Waiting for CRDs to be established...")
+
 	for _, crdName := range crdNames {
 		err := wait.PollUntilContextTimeout(ctx, e.options.CRD.PollInterval, e.options.CRD.ReadyTimeout, true, func(ctx context.Context) (bool, error) {
 			obj := &apiextensionsv1.CustomResourceDefinition{}
@@ -567,8 +569,14 @@ func (e *K3sEnv) waitForWebhooksReady(
 	ctx context.Context,
 	hostPort string,
 ) error {
+	e.debugf("Waiting for webhooks to be ready...")
+
 	err := wait.PollUntilContextTimeout(ctx, e.options.Webhook.PollInterval, e.options.Webhook.ReadyTimeout, true, func(ctx context.Context) (bool, error) {
 		err := e.checkWebhookHealth(ctx, hostPort)
+		if err != nil {
+			e.debugf("Webhook %s is not ready: %v", hostPort, err)
+		}
+
 		return err == nil, nil
 	})
 
