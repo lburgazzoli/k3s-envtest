@@ -222,11 +222,40 @@ func TestLogger_ContainerLogRedirection(t *testing.T) {
 	// (actual k3s container logs would be tested in integration tests)
 }
 
+func TestLogger_TestingTCompatibility(t *testing.T) {
+	t.Run("WithLogger option", func(t *testing.T) {
+		g := NewWithT(t)
+
+		// Verify that testing.T can be passed directly to WithLogger
+		env, err := k3senv.New(
+			k3senv.WithLogger(t),
+		)
+
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(env).NotTo(BeNil())
+	})
+
+	t.Run("Struct initialization", func(t *testing.T) {
+		g := NewWithT(t)
+
+		// Verify that testing.T can be used in struct initialization
+		env, err := k3senv.New(&k3senv.Options{
+			Logger: t,
+		})
+
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(env).NotTo(BeNil())
+
+		// Both subtests pass if compilation succeeds,
+		// proving that testing.T implements the Logger interface
+	})
+}
+
 // mockLogger implements the Logger interface for testing.
 type mockLogger struct {
 	messages *[]string
 }
 
-func (m *mockLogger) Printf(format string, args ...interface{}) {
+func (m *mockLogger) Logf(format string, args ...interface{}) {
 	*m.messages = append(*m.messages, fmt.Sprintf(format, args...))
 }

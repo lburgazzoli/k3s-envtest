@@ -63,7 +63,7 @@ func (lc *loggerConsumer) Accept(log testcontainers.Log) {
 	if lc.logger != nil {
 		message := strings.TrimSpace(string(log.Content))
 		if message != "" {
-			lc.logger.Printf("[k3s] %s", message)
+			lc.logger.Logf("[k3s] %s", message)
 		}
 	}
 }
@@ -582,6 +582,6 @@ func (e *K3sEnv) waitForWebhooksReady(
 // debugf logs a debug message if a logger is configured.
 func (e *K3sEnv) debugf(format string, args ...interface{}) {
 	if e.options.Logger != nil {
-		e.options.Logger.Printf("[k3senv] "+format, args...)
+		e.options.Logger.Logf("[k3senv] "+format, args...)
 	}
 }

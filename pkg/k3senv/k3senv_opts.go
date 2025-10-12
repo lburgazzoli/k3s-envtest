@@ -26,7 +26,7 @@ const (
 
 // Logger is a simple interface compatible with testing.T and most logging frameworks.
 type Logger interface {
-	Printf(format string, args ...interface{})
+	Logf(format string, args ...interface{})
 }
 
 type Option interface {
