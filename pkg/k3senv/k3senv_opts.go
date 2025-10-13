@@ -38,6 +38,7 @@ type Option interface {
 type WebhookConfig struct {
 	Port               int           `mapstructure:"port"`
 	AutoInstall        bool          `mapstructure:"auto_install"`
+	CheckReadiness     bool          `mapstructure:"check_readiness"`
 	ReadyTimeout       time.Duration `mapstructure:"ready_timeout"`
 	HealthCheckTimeout time.Duration `mapstructure:"health_check_timeout"`
 	PollInterval       time.Duration `mapstructure:"poll_interval"`
@@ -96,6 +97,9 @@ func (o *Options) ApplyToOptions(target *Options) {
 	}
 	if o.Webhook.AutoInstall {
 		target.Webhook.AutoInstall = o.Webhook.AutoInstall
+	}
+	if o.Webhook.CheckReadiness {
+		target.Webhook.CheckReadiness = o.Webhook.CheckReadiness
 	}
 	if o.Webhook.ReadyTimeout != 0 {
 		target.Webhook.ReadyTimeout = o.Webhook.ReadyTimeout
@@ -222,6 +226,18 @@ func (w *WebhookPort) ApplyToOptions(o *Options) {
 	o.Webhook.Port = w.port
 }
 
+type WebhookCheckReadiness struct {
+	enable bool
+}
+
+func WithWebhookCheckReadiness(enable bool) Option {
+	return &WebhookCheckReadiness{enable: enable}
+}
+
+func (w *WebhookCheckReadiness) ApplyToOptions(o *Options) {
+	o.Webhook.CheckReadiness = w.enable
+}
+
 type K3sImage struct {
 	image string
 }
@@ -297,6 +313,7 @@ func LoadConfigFromEnv() (*Options, error) {
 	// Set defaults that match the current defaults in New()
 	v.SetDefault("webhook.port", DefaultWebhookPort)
 	v.SetDefault("webhook.auto_install", false)
+	v.SetDefault("webhook.check_readiness", false)
 	v.SetDefault("webhook.ready_timeout", WebhookReadyTimeout)
 	v.SetDefault("webhook.health_check_timeout", WebhookHealthCheckTimeout)
 	v.SetDefault("webhook.poll_interval", DefaultWebhookPollInterval)

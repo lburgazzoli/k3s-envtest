@@ -280,7 +280,10 @@ func (e *K3sEnv) InstallWebhooks(ctx context.Context) error {
 			return fmt.Errorf("failed to create webhook config %s: %w", wh.GetName(), err)
 		}
 
-		// Check that the webhook endpoints are responding
+		if !e.options.Webhook.CheckReadiness {
+			continue
+		}
+
 		if err := e.waitForWebhookEndpointsReady(ctx, wh, e.options.Webhook.Port); err != nil {
 			return fmt.Errorf("webhook config %s endpoints not ready: %w", wh.GetName(), err)
 		}
