@@ -9,22 +9,82 @@ import (
 	"github.com/lburgazzoli/k3s-envtest/internal/testdata/v1alpha1"
 	"github.com/lburgazzoli/k3s-envtest/internal/testdata/v1beta1"
 	"github.com/lburgazzoli/k3s-envtest/pkg/k3senv"
-	admissionv1 "k8s.io/api/admissionregistration/v1"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	admissionv1 "k8s.io/api/admissionregistration/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/utils/ptr"
 
 	. "github.com/onsi/gomega"
 )
 
+//nolint:gochecknoinits
 func init() {
 	log.SetLogger(zap.New(zap.UseDevMode(true)))
+}
+
+func testAdmissionWebhookConfiguration(
+	t *testing.T,
+	webhook client.Object,
+	expectedPath string,
+) {
+	t.Helper()
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	scheme := runtime.NewScheme()
+	err := admissionv1.AddToScheme(scheme)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	env, err := k3senv.New(
+		k3senv.WithScheme(scheme),
+		k3senv.WithObjects(webhook),
+		k3senv.WithCertPath(t.TempDir()),
+		k3senv.WithWebhookCheckReadiness(false),
+	)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	err = env.Start(ctx)
+	g.Expect(err).NotTo(HaveOccurred())
+	t.Cleanup(func() {
+		_ = env.Stop(ctx)
+	})
+
+	err = env.InstallWebhooks(ctx)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	installedWebhook := webhook.DeepCopyObject().(client.Object)
+	err = env.Client().Get(ctx, client.ObjectKey{Name: webhook.GetName()}, installedWebhook)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	unstructuredWebhook, err := resources.ToUnstructured(installedWebhook)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	url, err := jq.QueryTyped[string](
+		unstructuredWebhook,
+		`.webhooks[0].clientConfig.url`,
+	)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(url).To(Equal("https://host.testcontainers.internal:9443" + expectedPath))
+
+	caBundle, err := jq.QueryTyped[string](
+		unstructuredWebhook,
+		`.webhooks[0].clientConfig.caBundle`,
+	)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(caBundle).NotTo(BeEmpty())
+
+	service, err := jq.Query(
+		unstructuredWebhook,
+		`.webhooks[0].clientConfig.service`,
+	)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(service).To(BeNil())
 }
 
 func TestK3sEnv_GetKubeconfig_Success(t *testing.T) {
@@ -297,13 +357,6 @@ func TestInstallWebhooks_NonConvertibleCRD_SkipsConversion(t *testing.T) {
 }
 
 func TestInstallWebhooks_ValidatingWebhook_ConfiguresURLAndCA(t *testing.T) {
-	g := NewWithT(t)
-	ctx := context.Background()
-
-	scheme := runtime.NewScheme()
-	err := admissionv1.AddToScheme(scheme)
-	g.Expect(err).NotTo(HaveOccurred())
-
 	failurePolicy := admissionv1.Fail
 	sideEffects := admissionv1.SideEffectClassNone
 
@@ -338,60 +391,10 @@ func TestInstallWebhooks_ValidatingWebhook_ConfiguresURLAndCA(t *testing.T) {
 		},
 	}
 
-	env, err := k3senv.New(
-		k3senv.WithScheme(scheme),
-		k3senv.WithObjects(webhook),
-		k3senv.WithCertPath(t.TempDir()),
-		k3senv.WithWebhookCheckReadiness(false),
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-
-	err = env.Start(ctx)
-	g.Expect(err).NotTo(HaveOccurred())
-	t.Cleanup(func() {
-		_ = env.Stop(ctx)
-	})
-
-	err = env.InstallWebhooks(ctx)
-	g.Expect(err).NotTo(HaveOccurred())
-
-	installedWebhook := &admissionv1.ValidatingWebhookConfiguration{}
-	err = env.Client().Get(ctx, client.ObjectKey{Name: webhook.Name}, installedWebhook)
-	g.Expect(err).NotTo(HaveOccurred())
-
-	unstructuredWebhook, err := resources.ToUnstructured(installedWebhook)
-	g.Expect(err).NotTo(HaveOccurred())
-
-	url, err := jq.QueryTyped[string](
-		unstructuredWebhook,
-		`.webhooks[0].clientConfig.url`,
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(url).To(Equal("https://host.testcontainers.internal:9443/validate"))
-
-	caBundle, err := jq.QueryTyped[string](
-		unstructuredWebhook,
-		`.webhooks[0].clientConfig.caBundle`,
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(caBundle).NotTo(BeEmpty())
-
-	service, err := jq.Query(
-		unstructuredWebhook,
-		`.webhooks[0].clientConfig.service`,
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(service).To(BeNil())
+	testAdmissionWebhookConfiguration(t, webhook, "/validate")
 }
 
 func TestInstallWebhooks_MutatingWebhook_ConfiguresURLAndCA(t *testing.T) {
-	g := NewWithT(t)
-	ctx := context.Background()
-
-	scheme := runtime.NewScheme()
-	err := admissionv1.AddToScheme(scheme)
-	g.Expect(err).NotTo(HaveOccurred())
-
 	failurePolicy := admissionv1.Fail
 	sideEffects := admissionv1.SideEffectClassNone
 
@@ -426,50 +429,7 @@ func TestInstallWebhooks_MutatingWebhook_ConfiguresURLAndCA(t *testing.T) {
 		},
 	}
 
-	env, err := k3senv.New(
-		k3senv.WithScheme(scheme),
-		k3senv.WithObjects(webhook),
-		k3senv.WithCertPath(t.TempDir()),
-		k3senv.WithWebhookCheckReadiness(false),
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-
-	err = env.Start(ctx)
-	g.Expect(err).NotTo(HaveOccurred())
-	t.Cleanup(func() {
-		_ = env.Stop(ctx)
-	})
-
-	err = env.InstallWebhooks(ctx)
-	g.Expect(err).NotTo(HaveOccurred())
-
-	installedWebhook := &admissionv1.MutatingWebhookConfiguration{}
-	err = env.Client().Get(ctx, client.ObjectKey{Name: webhook.Name}, installedWebhook)
-	g.Expect(err).NotTo(HaveOccurred())
-
-	unstructuredWebhook, err := resources.ToUnstructured(installedWebhook)
-	g.Expect(err).NotTo(HaveOccurred())
-
-	url, err := jq.QueryTyped[string](
-		unstructuredWebhook,
-		`.webhooks[0].clientConfig.url`,
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(url).To(Equal("https://host.testcontainers.internal:9443/mutate"))
-
-	caBundle, err := jq.QueryTyped[string](
-		unstructuredWebhook,
-		`.webhooks[0].clientConfig.caBundle`,
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(caBundle).NotTo(BeEmpty())
-
-	service, err := jq.Query(
-		unstructuredWebhook,
-		`.webhooks[0].clientConfig.service`,
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(service).To(BeNil())
+	testAdmissionWebhookConfiguration(t, webhook, "/mutate")
 }
 
 func TestInstallWebhooks_WebhookWithDefaultPath_UsesSlash(t *testing.T) {
