@@ -459,7 +459,7 @@ func (e *K3sEnv) patchAndUpdateCRDConversions(
 			.spec.conversion = {
 				"strategy": "Webhook",
 				"webhook": {
-					"conversionReviewVersions": ["v1"],
+					"conversionReviewVersions": ["v1", "v1beta1"],
 					"clientConfig": {
 						"url": "%s",
 						"caBundle": "%s"
