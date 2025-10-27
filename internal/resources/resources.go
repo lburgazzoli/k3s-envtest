@@ -105,7 +105,8 @@ func Decode(content []byte) ([]unstructured.Unstructured, error) {
 			continue
 		}
 
-		if out["Kind"] == "" {
+		kind, ok := out["kind"]
+		if !ok || kind == nil || kind == "" {
 			continue
 		}
 
