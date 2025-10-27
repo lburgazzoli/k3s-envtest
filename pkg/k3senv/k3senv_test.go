@@ -93,20 +93,20 @@ func TestK3sEnv_GetKubeconfig_Success(t *testing.T) {
 	ctx := context.Background()
 
 	env, err := k3senv.New(k3senv.WithCertPath(t.TempDir()))
-	g.Expect(err).ShouldNot(HaveOccurred())
+	g.Expect(err).NotTo(HaveOccurred())
 	t.Cleanup(func() {
 		_ = env.Stop(ctx)
 	})
 
 	err = env.Start(ctx)
-	g.Expect(err).ShouldNot(HaveOccurred())
+	g.Expect(err).NotTo(HaveOccurred())
 
 	kubeconfigData, err := env.GetKubeconfig(ctx)
-	g.Expect(err).ShouldNot(HaveOccurred())
-	g.Expect(kubeconfigData).ToNot(BeEmpty())
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(kubeconfigData).NotTo(BeEmpty())
 
 	config, err := clientcmd.Load(kubeconfigData)
-	g.Expect(err).ShouldNot(HaveOccurred())
+	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(config).To(PointTo(MatchFields(IgnoreExtras, Fields{
 		"Clusters":  Not(BeEmpty()),
 		"AuthInfos": Not(BeEmpty()),
@@ -119,7 +119,7 @@ func TestK3sEnv_GetKubeconfig_BeforeStart(t *testing.T) {
 	ctx := context.Background()
 
 	env, err := k3senv.New()
-	g.Expect(err).ShouldNot(HaveOccurred())
+	g.Expect(err).NotTo(HaveOccurred())
 
 	_, err = env.GetKubeconfig(ctx)
 	g.Expect(err).To(HaveOccurred())
@@ -131,22 +131,22 @@ func TestK3sEnv_GetKubeconfig_MatchesConfig(t *testing.T) {
 	ctx := context.Background()
 
 	env, err := k3senv.New(k3senv.WithCertPath(t.TempDir()))
-	g.Expect(err).ShouldNot(HaveOccurred())
+	g.Expect(err).NotTo(HaveOccurred())
 	t.Cleanup(func() {
 		_ = env.Stop(ctx)
 	})
 
 	err = env.Start(ctx)
-	g.Expect(err).ShouldNot(HaveOccurred())
+	g.Expect(err).NotTo(HaveOccurred())
 
 	kubeconfigData, err := env.GetKubeconfig(ctx)
-	g.Expect(err).ShouldNot(HaveOccurred())
+	g.Expect(err).NotTo(HaveOccurred())
 
 	config, err := clientcmd.Load(kubeconfigData)
-	g.Expect(err).ShouldNot(HaveOccurred())
+	g.Expect(err).NotTo(HaveOccurred())
 
 	restConfig, err := clientcmd.NewDefaultClientConfig(*config, &clientcmd.ConfigOverrides{}).ClientConfig()
-	g.Expect(err).ShouldNot(HaveOccurred())
+	g.Expect(err).NotTo(HaveOccurred())
 
 	envConfig := env.Config()
 	g.Expect(restConfig.Host).To(Equal(envConfig.Host))
