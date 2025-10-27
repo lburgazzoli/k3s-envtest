@@ -385,7 +385,7 @@ func (e *K3sEnv) startK3sContainer(ctx context.Context) error {
 
 	container, err := k3s.Run(ctx, e.options.K3s.Image, opts...)
 	if err != nil {
-		return fmt.Errorf("failed to start k3s container: %w", err)
+		return fmt.Errorf("failed to start k3s container with image %s: %w", e.options.K3s.Image, err)
 	}
 	e.container = container
 	return nil
@@ -394,12 +394,12 @@ func (e *K3sEnv) startK3sContainer(ctx context.Context) error {
 func (e *K3sEnv) setupKubeConfig(ctx context.Context) error {
 	kubeconfig, err := e.container.GetKubeConfig(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get kubeconfig: %w", err)
+		return fmt.Errorf("failed to get kubeconfig from container %s: %w", e.container.GetContainerID(), err)
 	}
 
 	cfg, err := clientcmd.RESTConfigFromKubeConfig(kubeconfig)
 	if err != nil {
-		return fmt.Errorf("failed to create REST config: %w", err)
+		return fmt.Errorf("failed to create REST config from kubeconfig: %w", err)
 	}
 	e.cfg = cfg
 	return nil
@@ -408,7 +408,7 @@ func (e *K3sEnv) setupKubeConfig(ctx context.Context) error {
 func (e *K3sEnv) createKubernetesClients() error {
 	cli, err := client.New(e.cfg, client.Options{Scheme: e.options.Scheme})
 	if err != nil {
-		return fmt.Errorf("failed to create client: %w", err)
+		return fmt.Errorf("failed to create Kubernetes client with scheme: %w", err)
 	}
 
 	e.cli = cli
@@ -425,7 +425,7 @@ func (e *K3sEnv) setupCertificates() error {
 
 	certData, err := generateCertificates(e.options.Certificate.Path, e.options.Certificate.Validity)
 	if err != nil {
-		return fmt.Errorf("failed to generate certificates: %w", err)
+		return fmt.Errorf("failed to generate certificates in path %s: %w", e.options.Certificate.Path, err)
 	}
 
 	e.certData = certData
@@ -446,7 +446,7 @@ func (e *K3sEnv) prepareManifests() error {
 	if len(e.options.Manifest.Paths) > 0 {
 		manifests, err := loadManifestsFromPaths(e.options.Manifest.Paths)
 		if err != nil {
-			return fmt.Errorf("failed to load manifests from paths: %w", err)
+			return fmt.Errorf("failed to load manifests from paths %v: %w", e.options.Manifest.Paths, err)
 		}
 		e.manifests = append(e.manifests, manifests...)
 	}
@@ -454,7 +454,7 @@ func (e *K3sEnv) prepareManifests() error {
 	if len(e.options.Manifest.Objects) > 0 {
 		manifests, err := loadObjectsToManifests(e.options.Scheme, e.options.Manifest.Objects)
 		if err != nil {
-			return fmt.Errorf("failed to load objects: %w", err)
+			return fmt.Errorf("failed to load %d runtime objects: %w", len(e.options.Manifest.Objects), err)
 		}
 		e.manifests = append(e.manifests, manifests...)
 	}
@@ -469,7 +469,7 @@ func (e *K3sEnv) installCRDsIfNeeded(ctx context.Context) error {
 	}
 
 	if err := e.installCRDs(ctx); err != nil {
-		return fmt.Errorf("failed to install CRDs: %w", err)
+		return fmt.Errorf("failed to install %d CRDs: %w", len(crds), err)
 	}
 
 	if err := e.waitForCRDsEstablished(ctx, extractNames(crds)); err != nil {

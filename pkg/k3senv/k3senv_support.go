@@ -177,14 +177,14 @@ func checkWebhookEndpoint(
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return fmt.Errorf("failed to create HTTP request to %s: %w", url, err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to connect: %w", err)
+		return fmt.Errorf("failed to connect to webhook endpoint %s: %w", url, err)
 	}
 	defer func() {
 		_ = resp.Body.Close()
