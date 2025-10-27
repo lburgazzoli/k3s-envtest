@@ -9,6 +9,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -24,6 +25,13 @@ const (
 	WebhookHealthCheckTimeout  = 5 * time.Second
 	CRDReadyTimeout            = 30 * time.Second
 )
+
+// Bool returns a pointer to the boolean value passed in.
+// This is a convenience alias to ptr.To from k8s.io/utils/ptr.
+// Use this for creating pointer boolean values for configuration.
+func Bool(b bool) *bool {
+	return ptr.To(b)
+}
 
 // Logger is a simple interface for structured logging, designed to be compatible
 // with testing.T's Logf method. This allows tests to easily capture k3senv debug
@@ -67,8 +75,8 @@ type Option interface {
 // WebhookConfig groups all webhook-related configuration.
 type WebhookConfig struct {
 	Port               int           `mapstructure:"port"`
-	AutoInstall        bool          `mapstructure:"auto_install"`
-	CheckReadiness     bool          `mapstructure:"check_readiness"`
+	AutoInstall        *bool         `mapstructure:"auto_install"`
+	CheckReadiness     *bool         `mapstructure:"check_readiness"`
 	ReadyTimeout       time.Duration `mapstructure:"ready_timeout"`
 	HealthCheckTimeout time.Duration `mapstructure:"health_check_timeout"`
 	PollInterval       time.Duration `mapstructure:"poll_interval"`
@@ -84,7 +92,7 @@ type CRDConfig struct {
 type K3sConfig struct {
 	Image          string   `mapstructure:"image"`
 	Args           []string `mapstructure:"args"`
-	LogRedirection bool     `mapstructure:"log_redirection"`
+	LogRedirection *bool    `mapstructure:"log_redirection"`
 }
 
 // CertificateConfig groups all certificate-related configuration.
@@ -125,10 +133,10 @@ func (o *Options) ApplyToOptions(target *Options) {
 	if o.Webhook.Port != 0 {
 		target.Webhook.Port = o.Webhook.Port
 	}
-	if o.Webhook.AutoInstall {
+	if o.Webhook.AutoInstall != nil {
 		target.Webhook.AutoInstall = o.Webhook.AutoInstall
 	}
-	if o.Webhook.CheckReadiness {
+	if o.Webhook.CheckReadiness != nil {
 		target.Webhook.CheckReadiness = o.Webhook.CheckReadiness
 	}
 	if o.Webhook.ReadyTimeout != 0 {
@@ -156,7 +164,7 @@ func (o *Options) ApplyToOptions(target *Options) {
 	if len(o.K3s.Args) > 0 {
 		target.K3s.Args = append(target.K3s.Args, o.K3s.Args...)
 	}
-	if o.K3s.LogRedirection {
+	if o.K3s.LogRedirection != nil {
 		target.K3s.LogRedirection = o.K3s.LogRedirection
 	}
 
@@ -241,7 +249,7 @@ func WithAutoInstallWebhooks(enable bool) Option {
 }
 
 func (a *AutoInstallWebhooks) ApplyToOptions(o *Options) {
-	o.Webhook.AutoInstall = a.enable
+	o.Webhook.AutoInstall = &a.enable
 }
 
 type WebhookPort struct {
@@ -265,7 +273,7 @@ func WithWebhookCheckReadiness(enable bool) Option {
 }
 
 func (w *WebhookCheckReadiness) ApplyToOptions(o *Options) {
-	o.Webhook.CheckReadiness = w.enable
+	o.Webhook.CheckReadiness = &w.enable
 }
 
 type K3sImage struct {
@@ -301,7 +309,7 @@ func WithK3sLogRedirection(enable bool) Option {
 }
 
 func (k *K3sLogRedirection) ApplyToOptions(o *Options) {
-	o.K3s.LogRedirection = k.enable
+	o.K3s.LogRedirection = &k.enable
 }
 
 type CertValidity struct {
@@ -360,6 +368,17 @@ func LoadConfigFromEnv() (*Options, error) {
 
 	if err := v.Unmarshal(&opts); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config from environment: %w", err)
+	}
+
+	// Set pointer defaults if not set by environment variables
+	if opts.Webhook.AutoInstall == nil {
+		opts.Webhook.AutoInstall = ptr.To(false)
+	}
+	if opts.Webhook.CheckReadiness == nil {
+		opts.Webhook.CheckReadiness = ptr.To(false)
+	}
+	if opts.K3s.LogRedirection == nil {
+		opts.K3s.LogRedirection = ptr.To(DefaultK3sLogRedirection)
 	}
 
 	return &opts, nil

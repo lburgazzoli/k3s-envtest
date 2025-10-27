@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -182,7 +183,7 @@ func (e *K3sEnv) Start(ctx context.Context) error {
 		return err
 	}
 
-	if e.options.Webhook.AutoInstall {
+	if ptr.Deref(e.options.Webhook.AutoInstall, false) {
 		e.debugf("Installing webhooks automatically")
 		if err := e.InstallWebhooks(ctx); err != nil {
 			return fmt.Errorf("failed to auto-install webhooks: %w", err)
@@ -320,7 +321,7 @@ func (e *K3sEnv) InstallWebhooks(ctx context.Context) error {
 			return fmt.Errorf("failed to create webhook config %s: %w", wh.GetName(), err)
 		}
 
-		if !e.options.Webhook.CheckReadiness {
+		if !ptr.Deref(e.options.Webhook.CheckReadiness, false) {
 			continue
 		}
 
@@ -377,7 +378,7 @@ func (e *K3sEnv) startK3sContainer(ctx context.Context) error {
 	}
 
 	// Add log consumer to forward container logs to k3senv Logger
-	if e.options.K3s.LogRedirection && e.options.Logger != nil {
+	if ptr.Deref(e.options.K3s.LogRedirection, false) && e.options.Logger != nil {
 		opts = append(opts, testcontainers.WithLogConsumers(&loggerConsumer{
 			logger: e.options.Logger,
 		}))
