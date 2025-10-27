@@ -54,6 +54,22 @@ func readFile(path string, elements ...string) ([]byte, error) {
 	return data, nil
 }
 
+func (e *K3sEnv) createWebhookHTTPClient() (*http.Client, error) {
+	caCertPool := x509.NewCertPool()
+	if !caCertPool.AppendCertsFromPEM(e.certData.CACert) {
+		return nil, errors.New("failed to parse CA certificate")
+	}
+
+	return &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs:    caCertPool,
+				MinVersion: tls.VersionTLS12,
+			},
+		},
+	}, nil
+}
+
 func generateCertificates(
 	certPath string,
 	validity time.Duration,
@@ -144,23 +160,17 @@ func determineConvertibleCRDs(
 // Accepts 4xx responses since webhooks may reject the test payload but are still healthy.
 func checkWebhookEndpoint(
 	ctx context.Context,
+	client *http.Client,
 	url string,
 	timeout time.Duration,
-	caCert []byte,
 ) error {
-	caCertPool := x509.NewCertPool()
-	if !caCertPool.AppendCertsFromPEM(caCert) {
-		return errors.New("failed to parse CA certificate")
-	}
+	// Create child context with timeout for this specific request
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
-	c := &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				RootCAs:    caCertPool,
-				MinVersion: tls.VersionTLS12,
-			},
-		},
+	// Early bailout if context already cancelled
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled: %w", err)
 	}
 
 	// Minimal AdmissionReview request for health check.
@@ -182,7 +192,7 @@ func checkWebhookEndpoint(
 
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to connect to webhook endpoint %s: %w", url, err)
 	}
@@ -218,6 +228,12 @@ func (e *K3sEnv) waitForWebhookEndpointsReady(
 
 	e.debugf("Checking %d webhook endpoints for %s...", len(webhookURLs), webhookConfig.GetName())
 
+	// Create HTTP client once for all endpoint checks
+	client, err := e.createWebhookHTTPClient()
+	if err != nil {
+		return fmt.Errorf("failed to create webhook HTTP client: %w", err)
+	}
+
 	// Check each webhook endpoint
 	for _, webhookURL := range webhookURLs {
 		parsedURL, err := url.Parse(webhookURL)
@@ -234,7 +250,7 @@ func (e *K3sEnv) waitForWebhookEndpointsReady(
 		e.debugf("Checking webhook endpoint: %s (local: %s)", webhookURL, localURL)
 
 		err = wait.PollUntilContextTimeout(ctx, e.options.Webhook.PollInterval, e.options.Webhook.ReadyTimeout, true, func(ctx context.Context) (bool, error) {
-			return checkWebhookEndpoint(ctx, localURL, e.options.Webhook.HealthCheckTimeout, e.certData.CACert) == nil, nil
+			return checkWebhookEndpoint(ctx, client, localURL, e.options.Webhook.HealthCheckTimeout) == nil, nil
 		})
 
 		if err != nil {
