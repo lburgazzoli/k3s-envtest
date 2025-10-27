@@ -21,6 +21,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	. "github.com/onsi/gomega"
+	. "github.com/onsi/gomega/gstruct"
 )
 
 //nolint:gochecknoinits
@@ -106,10 +107,11 @@ func TestK3sEnv_GetKubeconfig_Success(t *testing.T) {
 
 	config, err := clientcmd.Load(kubeconfigData)
 	g.Expect(err).ShouldNot(HaveOccurred())
-	g.Expect(config).ToNot(BeNil())
-	g.Expect(config.Clusters).ToNot(BeEmpty())
-	g.Expect(config.AuthInfos).ToNot(BeEmpty())
-	g.Expect(config.Contexts).ToNot(BeEmpty())
+	g.Expect(config).To(PointTo(MatchFields(IgnoreExtras, Fields{
+		"Clusters":  Not(BeEmpty()),
+		"AuthInfos": Not(BeEmpty()),
+		"Contexts":  Not(BeEmpty()),
+	})))
 }
 
 func TestK3sEnv_GetKubeconfig_BeforeStart(t *testing.T) {
@@ -608,9 +610,10 @@ func TestInstallWebhooks_MultipleWebhooks_ConfiguresAll(t *testing.T) {
 		`[.webhooks[].clientConfig.caBundle]`,
 	)
 	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(caBundles).To(HaveLen(2))
-	g.Expect(caBundles[0]).NotTo(BeEmpty())
-	g.Expect(caBundles[1]).NotTo(BeEmpty())
+	g.Expect(caBundles).To(And(
+		HaveLen(2),
+		HaveEach(Not(BeEmpty())),
+	))
 	g.Expect(caBundles[0]).To(Equal(caBundles[1]))
 }
 
