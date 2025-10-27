@@ -177,9 +177,13 @@ export K3SENV_CRD_POLL_INTERVAL=50ms
 
 ### Webhook Testing
 
-k3s-envtest provides comprehensive webhook testing capabilities:
+k3s-envtest provides comprehensive webhook testing capabilities with controller-runtime integration:
 
 ```go
+import (
+    ctrl "sigs.k8s.io/controller-runtime"
+)
+
 env, err := k3senv.New(
     k3senv.WithManifests("testdata/webhooks"),
     k3senv.WithAutoInstallWebhooks(true),
@@ -188,22 +192,31 @@ if err != nil {
     return err
 }
 
-// Start webhook server
-webhookServer := env.WebhookServer()
-webhookServer.Register("/validate", &myValidator{})
-webhookServer.Register("/mutate", &myMutator{})
-
-go func() {
-    if err := webhookServer.Start(context.Background()); err != nil {
-        log.Printf("Webhook server error: %v", err)
-    }
-}()
-
-// Start k3s environment
+// Start k3s environment first
 if err := env.Start(ctx); err != nil {
     return err
 }
 defer env.Stop(ctx)
+
+// Create manager with pre-configured webhook server
+mgr, err := ctrl.NewManager(env.Config(), ctrl.Options{
+    Scheme:        scheme,
+    WebhookServer: env.WebhookServer(),
+})
+if err != nil {
+    return err
+}
+
+// Register your webhooks
+mgr.GetWebhookServer().Register("/validate", &myValidator{})
+mgr.GetWebhookServer().Register("/mutate", &myMutator{})
+
+// Start manager
+go func() {
+    if err := mgr.Start(ctx); err != nil {
+        log.Printf("Manager error: %v", err)
+    }
+}()
 
 // Webhooks are now active and configured
 ```
@@ -330,18 +343,24 @@ func TestWebhookValidation(t *testing.T) {
     )
     g.Expect(err).NotTo(HaveOccurred())
     
-    // Setup webhook server
-    webhookServer := env.WebhookServer()
-    webhookServer.Register("/validate", &myValidator{})
+    g.Expect(env.Start(ctx)).To(Succeed())
+    defer env.Stop(ctx)
+    
+    // Create manager with pre-configured webhook server
+    mgr, err := ctrl.NewManager(env.Config(), ctrl.Options{
+        Scheme:        scheme,
+        WebhookServer: env.WebhookServer(),
+    })
+    g.Expect(err).NotTo(HaveOccurred())
+    
+    // Register your webhooks
+    mgr.GetWebhookServer().Register("/validate", &myValidator{})
     
     go func() {
         defer GinkgoRecover()
-        err := webhookServer.Start(ctx)
+        err := mgr.Start(ctx)
         g.Expect(err).NotTo(HaveOccurred())
     }()
-    
-    g.Expect(env.Start(ctx)).To(Succeed())
-    defer env.Stop(ctx)
     
     // Test webhook validation...
     client := env.Client()
