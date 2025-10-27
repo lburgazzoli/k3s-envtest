@@ -17,13 +17,26 @@ const (
 	DefaultK3sLogRedirection = false
 	DefaultWebhookPort       = 9443
 	DefaultCertDirPrefix     = "/tmp/k3senv-certs-"
+	DefaultCertDirPermission = 0o750 // Owner: rwx, Group: r-x, Other: none
 	DefaultCertValidity      = 24 * time.Hour
 
 	DefaultWebhookPollInterval = 500 * time.Millisecond
 	DefaultCRDPollInterval     = 100 * time.Millisecond
-	WebhookReadyTimeout        = 30 * time.Second
-	WebhookHealthCheckTimeout  = 5 * time.Second
-	CRDReadyTimeout            = 30 * time.Second
+
+	// WebhookReadyTimeout is the internal default maximum time to wait for each
+	// individual webhook endpoint to become ready. The system polls each endpoint
+	// until it responds successfully or this timeout expires.
+	// Applied per endpoint, not cumulative across all endpoints.
+	WebhookReadyTimeout = 30 * time.Second
+
+	// WebhookHealthCheckTimeout is the internal default HTTP client timeout for each
+	// individual health check request attempt to a webhook endpoint.
+	// Multiple attempts may be made within WebhookReadyTimeout.
+	WebhookHealthCheckTimeout = 5 * time.Second
+
+	// CRDReadyTimeout is the internal default maximum time to wait for all CRDs
+	// to reach the Established condition after installation.
+	CRDReadyTimeout = 30 * time.Second
 )
 
 // Bool returns a pointer to the boolean value passed in.

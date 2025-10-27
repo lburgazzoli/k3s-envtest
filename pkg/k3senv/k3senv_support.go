@@ -58,7 +58,7 @@ func generateCertificates(
 	certPath string,
 	validity time.Duration,
 ) (*CertData, error) {
-	if err := os.MkdirAll(certPath, 0750); err != nil {
+	if err := os.MkdirAll(certPath, DefaultCertDirPermission); err != nil {
 		return nil, fmt.Errorf("failed to create cert directory: %w", err)
 	}
 
