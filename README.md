@@ -88,12 +88,14 @@ env, err := k3senv.New(
 ```go
 env, err := k3senv.New(&k3senv.Options{
     K3s: k3senv.K3sConfig{
-        Image: "rancher/k3s:v1.32.9-k3s1",
-        Args:  []string{"--disable=traefik"},
+        Image:          "rancher/k3s:v1.32.9-k3s1",
+        Args:           []string{"--disable=traefik"},
+        LogRedirection: k3senv.Bool(false), // Use Bool() for pointer booleans
     },
     Webhook: k3senv.WebhookConfig{
         Port:               9443,
-        AutoInstall:        true,
+        AutoInstall:        k3senv.Bool(true),  // Use Bool() for pointer booleans
+        CheckReadiness:     k3senv.Bool(false), // Explicit false now possible
         ReadyTimeout:       30 * time.Second,
         HealthCheckTimeout: 5 * time.Second,
         PollInterval:       500 * time.Millisecond, // Webhook polling rate
@@ -112,6 +114,8 @@ env, err := k3senv.New(&k3senv.Options{
     Logger: t, // Enable container log redirection
 })
 ```
+
+> **Note:** Boolean configuration fields (`AutoInstall`, `CheckReadiness`, `LogRedirection`) use pointer types (`*bool`) to distinguish between "not set" and "explicitly false". Use `k3senv.Bool(value)` or `ptr.To(value)` from `k8s.io/utils/ptr`. Functional options like `WithAutoInstallWebhooks()` handle this automatically.
 
 ### Environment Variables
 

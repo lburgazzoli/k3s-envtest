@@ -55,13 +55,20 @@ type Options struct {
     // ... many more fields
 }
 
-// After: Structured groupings
+// After: Structured groupings with pointer booleans
 type Options struct {
     Webhook     WebhookConfig
     K3s         K3sConfig  
     Certificate CertificateConfig
     Manifest    ManifestConfig
     CRD         CRDConfig
+}
+
+type WebhookConfig struct {
+    Port           int
+    AutoInstall    *bool  // Pointer to distinguish "not set" from "false"
+    CheckReadiness *bool  // Pointer to distinguish "not set" from "false"
+    // ... other fields
 }
 ```
 
@@ -205,11 +212,22 @@ func TestMyFeature(t *testing.T) {
 **Implementation**:
 ```go
 type Logger interface {
-    Printf(format string, args ...interface{})
+    Logf(format string, args ...interface{})
 }
 
-// Usage
+// LoggerFunc adapter for printf-style functions
+type LoggerFunc func(format string, args ...interface{})
+
+func (f LoggerFunc) Logf(format string, args ...interface{}) {
+    f(format, args...)
+}
+
+// Usage with testing.T
 env, err := k3senv.New(k3senv.WithLogger(t))
+
+// Usage with standard library log
+logger := log.New(os.Stderr, "[k3senv] ", log.LstdFlags)
+env, err := k3senv.New(k3senv.WithLogger(k3senv.LoggerFunc(logger.Printf)))
 ```
 
 **Features**:
@@ -241,7 +259,7 @@ env, err := k3senv.New(k3senv.WithLogger(t))
 ```go
 type WebhookConfig struct {
     Port        int           `mapstructure:"port"`
-    AutoInstall bool          `mapstructure:"auto_install"`  
+    AutoInstall *bool         `mapstructure:"auto_install"`  // Pointer for optional bool
     Ready       time.Duration `mapstructure:"ready_timeout"`
 }
 ```
@@ -252,6 +270,14 @@ K3SENV_WEBHOOK_PORT=9443
 K3SENV_WEBHOOK_AUTO_INSTALL=true
 K3SENV_WEBHOOK_READY_TIMEOUT=30s
 ```
+
+**Pointer Boolean Rationale**:
+Boolean configuration fields use pointer types (`*bool`) to distinguish between three states:
+- `nil` - Not set (use default)
+- `&true` / `ptr.To(true)` - Explicitly enabled
+- `&false` / `ptr.To(false)` - Explicitly disabled
+
+This allows struct literal configuration to override environment variables with explicit `false` values, following Kubernetes API conventions for optional fields.
 
 ## Performance Considerations
 

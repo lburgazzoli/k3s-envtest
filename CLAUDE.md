@@ -25,6 +25,7 @@ Recent architectural enhancements include:
 - **Container Log Redirection** - Forward k3s container logs to configurable Logger interface with [k3s] prefix
 - **Structured Logging Interface** - Logger interface compatible with testing.T and debugging support
 - **Generic JQ Functions** - Type-safe JQ queries (QueryTyped[T], QuerySlice[T], QueryMap[K,V]) reduce boilerplate by 70%
+- **Pointer Booleans** - Boolean config fields use *bool to distinguish "not set" from "false" (breaking change)
 
 **Note:** Tests require Docker to be running as they spin up k3s containers using testcontainers-go.
 
@@ -317,14 +318,15 @@ func TestStructuredConfig(t *testing.T) {
     env, err := k3senv.New(&k3senv.Options{
         Webhook: k3senv.WebhookConfig{
             Port: 9443,
-            AutoInstall: true,
+            AutoInstall: k3senv.Bool(true),  // Use Bool() helper for pointer
         },
         K3s: k3senv.K3sConfig{
             Image: "rancher/k3s:latest",
             Args: []string{"--disable=traefik"},
+            LogRedirection: k3senv.Bool(false),  // Explicit false now possible
         },
         Certificate: k3senv.CertificateConfig{
-            Dir: t.TempDir(),
+            Path: t.TempDir(),
         },
     })
     g.Expect(err).NotTo(HaveOccurred())
