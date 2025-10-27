@@ -29,17 +29,32 @@ import (
 )
 
 const (
+	// DefaultWebhookServerHost is the default host address for the webhook server.
+	// It binds to all network interfaces (0.0.0.0) to allow connections from containers.
 	DefaultWebhookServerHost = "0.0.0.0"
 
+	// CACertFileName is the filename for the CA certificate PEM file.
 	CACertFileName = "cert-ca.pem"
-	CertFileName   = "cert-tls.pem"
-	KeyFileName    = "key-tls.pem"
 
-	WebhookURLScheme   = "https"
+	// CertFileName is the filename for the TLS certificate PEM file.
+	CertFileName = "cert-tls.pem"
+
+	// KeyFileName is the filename for the TLS private key PEM file.
+	KeyFileName = "key-tls.pem"
+
+	// WebhookURLScheme is the URL scheme used for webhook endpoints.
+	// Always HTTPS since webhooks require TLS certificates.
+	WebhookURLScheme = "https"
+
+	// WebhookConvertPath is the default path for CRD conversion webhook endpoints.
 	WebhookConvertPath = "/convert"
 )
 
 var (
+	// CertificateSANs contains the Subject Alternative Names (SANs) used when
+	// generating TLS certificates for webhook testing. This list includes common
+	// Docker networking hostnames and IP addresses to ensure webhooks can connect
+	// across different container networking configurations.
 	CertificateSANs = []string{
 		"host.docker.internal",
 		"host.testcontainers.internal",
