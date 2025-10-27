@@ -522,12 +522,14 @@ func (e *K3sEnv) patchAndUpdateCRDConversions(
 }
 
 func (e *K3sEnv) installCRDs(ctx context.Context) error {
-	for _, crd := range e.CRDs() {
-		err := e.cli.Create(ctx, crd.DeepCopy())
+	// CRDs() already returns deep copies, no need to copy again
+	crds := e.CRDs()
+	for i := range crds {
+		err := e.cli.Create(ctx, &crds[i])
 
 		if err != nil && !k8serr.IsAlreadyExists(err) {
 			return fmt.Errorf("failed to create CRD %s: %w",
-				resources.FormatObjectReference(&crd),
+				resources.FormatObjectReference(&crds[i]),
 				err,
 			)
 		}
