@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -145,13 +146,19 @@ func checkWebhookEndpoint(
 	ctx context.Context,
 	url string,
 	timeout time.Duration,
+	caCert []byte,
 ) error {
+	caCertPool := x509.NewCertPool()
+	if !caCertPool.AppendCertsFromPEM(caCert) {
+		return errors.New("failed to parse CA certificate")
+	}
+
 	c := &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				//nolint:gosec
-				InsecureSkipVerify: true,
+				RootCAs:    caCertPool,
+				MinVersion: tls.VersionTLS12,
 			},
 		},
 	}
@@ -227,7 +234,7 @@ func (e *K3sEnv) waitForWebhookEndpointsReady(
 		e.debugf("Checking webhook endpoint: %s (local: %s)", webhookURL, localURL)
 
 		err = wait.PollUntilContextTimeout(ctx, e.options.Webhook.PollInterval, e.options.Webhook.ReadyTimeout, true, func(ctx context.Context) (bool, error) {
-			return checkWebhookEndpoint(ctx, localURL, e.options.Webhook.HealthCheckTimeout) == nil, nil
+			return checkWebhookEndpoint(ctx, localURL, e.options.Webhook.HealthCheckTimeout, e.certData.CACert) == nil, nil
 		})
 
 		if err != nil {
