@@ -109,6 +109,46 @@ func New(opts ...Option) (*K3sEnv, error) {
 	return env, nil
 }
 
+// Start initializes and starts the k3s environment. It performs the following operations:
+// - Starts k3s container using testcontainers-go
+// - Configures kubeconfig for cluster access
+// - Creates Kubernetes clients
+// - Generates TLS certificates for webhook testing
+// - Loads and installs CRDs (waits for them to be established)
+// - Optionally installs webhooks if AutoInstall is enabled
+//
+// IMPORTANT: Always register cleanup immediately after New() to ensure proper resource cleanup:
+//
+//	env, err := k3senv.New(...)
+//	if err != nil {
+//	    return err
+//	}
+//	t.Cleanup(func() {
+//	    _ = env.Stop(ctx)
+//	})
+//
+//	err = env.Start(ctx)
+//	if err != nil {
+//	    return err  // Stop() will clean up partial resources
+//	}
+//
+// Or using defer:
+//
+//	env, err := k3senv.New(...)
+//	if err != nil {
+//	    return err
+//	}
+//	defer func() {
+//	    _ = env.Stop(ctx)
+//	}()
+//
+//	err = env.Start(ctx)
+//	if err != nil {
+//	    return err  // Stop() will clean up partial resources
+//	}
+//
+// The Stop() method is safe to call even if Start() fails partway through,
+// as it handles nil/uninitialized fields gracefully.
 func (e *K3sEnv) Start(ctx context.Context) error {
 	e.debugf("Starting k3s environment with image: %s", e.options.K3s.Image)
 	if len(e.options.K3s.Args) > 0 {

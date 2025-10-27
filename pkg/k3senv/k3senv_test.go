@@ -48,12 +48,12 @@ func testAdmissionWebhookConfiguration(
 		k3senv.WithWebhookCheckReadiness(false),
 	)
 	g.Expect(err).NotTo(HaveOccurred())
-
-	err = env.Start(ctx)
-	g.Expect(err).NotTo(HaveOccurred())
 	t.Cleanup(func() {
 		_ = env.Stop(ctx)
 	})
+
+	err = env.Start(ctx)
+	g.Expect(err).NotTo(HaveOccurred())
 
 	err = env.InstallWebhooks(ctx)
 	g.Expect(err).NotTo(HaveOccurred())
@@ -93,12 +93,12 @@ func TestK3sEnv_GetKubeconfig_Success(t *testing.T) {
 
 	env, err := k3senv.New(k3senv.WithCertPath(t.TempDir()))
 	g.Expect(err).ShouldNot(HaveOccurred())
-
-	err = env.Start(ctx)
-	g.Expect(err).ShouldNot(HaveOccurred())
 	t.Cleanup(func() {
 		_ = env.Stop(ctx)
 	})
+
+	err = env.Start(ctx)
+	g.Expect(err).ShouldNot(HaveOccurred())
 
 	kubeconfigData, err := env.GetKubeconfig(ctx)
 	g.Expect(err).ShouldNot(HaveOccurred())
@@ -130,12 +130,12 @@ func TestK3sEnv_GetKubeconfig_MatchesConfig(t *testing.T) {
 
 	env, err := k3senv.New(k3senv.WithCertPath(t.TempDir()))
 	g.Expect(err).ShouldNot(HaveOccurred())
-
-	err = env.Start(ctx)
-	g.Expect(err).ShouldNot(HaveOccurred())
 	t.Cleanup(func() {
 		_ = env.Stop(ctx)
 	})
+
+	err = env.Start(ctx)
+	g.Expect(err).ShouldNot(HaveOccurred())
 
 	kubeconfigData, err := env.GetKubeconfig(ctx)
 	g.Expect(err).ShouldNot(HaveOccurred())
@@ -243,12 +243,12 @@ func TestInstallWebhooks_ConvertibleCRD_ConfiguresConversionEndpoint(t *testing.
 		k3senv.WithCertPath(t.TempDir()),
 	)
 	g.Expect(err).NotTo(HaveOccurred())
-
-	err = env.Start(ctx)
-	g.Expect(err).NotTo(HaveOccurred())
 	t.Cleanup(func() {
 		_ = env.Stop(ctx)
 	})
+
+	err = env.Start(ctx)
+	g.Expect(err).NotTo(HaveOccurred())
 
 	err = env.InstallWebhooks(ctx)
 	g.Expect(err).NotTo(HaveOccurred())
@@ -331,12 +331,12 @@ func TestInstallWebhooks_NonConvertibleCRD_SkipsConversion(t *testing.T) {
 		k3senv.WithCertPath(t.TempDir()),
 	)
 	g.Expect(err).NotTo(HaveOccurred())
-
-	err = env.Start(ctx)
-	g.Expect(err).NotTo(HaveOccurred())
 	t.Cleanup(func() {
 		_ = env.Stop(ctx)
 	})
+
+	err = env.Start(ctx)
+	g.Expect(err).NotTo(HaveOccurred())
 
 	err = env.InstallWebhooks(ctx)
 	g.Expect(err).NotTo(HaveOccurred())
@@ -480,12 +480,12 @@ func TestInstallWebhooks_WebhookWithDefaultPath_UsesSlash(t *testing.T) {
 		k3senv.WithWebhookCheckReadiness(false),
 	)
 	g.Expect(err).NotTo(HaveOccurred())
-
-	err = env.Start(ctx)
-	g.Expect(err).NotTo(HaveOccurred())
 	t.Cleanup(func() {
 		_ = env.Stop(ctx)
 	})
+
+	err = env.Start(ctx)
+	g.Expect(err).NotTo(HaveOccurred())
 
 	err = env.InstallWebhooks(ctx)
 	g.Expect(err).NotTo(HaveOccurred())
@@ -577,12 +577,12 @@ func TestInstallWebhooks_MultipleWebhooks_ConfiguresAll(t *testing.T) {
 		k3senv.WithWebhookCheckReadiness(false),
 	)
 	g.Expect(err).NotTo(HaveOccurred())
-
-	err = env.Start(ctx)
-	g.Expect(err).NotTo(HaveOccurred())
 	t.Cleanup(func() {
 		_ = env.Stop(ctx)
 	})
+
+	err = env.Start(ctx)
+	g.Expect(err).NotTo(HaveOccurred())
 
 	err = env.InstallWebhooks(ctx)
 	g.Expect(err).NotTo(HaveOccurred())
