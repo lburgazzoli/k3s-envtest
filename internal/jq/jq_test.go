@@ -318,69 +318,69 @@ func TestTransform_SimpleFieldUpdate(t *testing.T) {
 	g.Expect(obj).To(WithTransform(toYAML, MatchYAML(simpleFieldUpdateExpected)))
 }
 
-// QueryTyped tests.
-func TestQueryTyped_String(t *testing.T) {
+// Query tests.
+func TestQuery_String(t *testing.T) {
 	g := NewWithT(t)
 
 	obj, err := resources.YAMLToUnstructured(configMapWithName)
 	g.Expect(err).NotTo(HaveOccurred())
 
-	result, err := jq.QueryTyped[string](obj, `.metadata.name`)
+	result, err := jq.Query[string](obj, `.metadata.name`)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(result).To(Equal("test-config"))
 }
 
-func TestQueryTyped_Bool(t *testing.T) {
+func TestQuery_Bool(t *testing.T) {
 	g := NewWithT(t)
 
 	obj, err := resources.YAMLToUnstructured(configMapWithEnabled)
 	g.Expect(err).NotTo(HaveOccurred())
 
-	result, err := jq.QueryTyped[bool](obj, `.data.enabled`)
+	result, err := jq.Query[bool](obj, `.data.enabled`)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(result).To(BeTrue())
 }
 
-func TestQueryTyped_Number(t *testing.T) {
+func TestQuery_Number(t *testing.T) {
 	g := NewWithT(t)
 
 	obj, err := resources.YAMLToUnstructured(specWithReplicas)
 	g.Expect(err).NotTo(HaveOccurred())
 
-	result, err := jq.QueryTyped[int](obj, `.spec.replicas`)
+	result, err := jq.Query[int](obj, `.spec.replicas`)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(result).To(Equal(3))
 }
 
-func TestQueryTyped_TypeMismatch(t *testing.T) {
+func TestQuery_TypeMismatch(t *testing.T) {
 	g := NewWithT(t)
 
 	obj, err := resources.YAMLToUnstructured(configMapTypeMismatch)
 	g.Expect(err).NotTo(HaveOccurred())
 
-	_, err = jq.QueryTyped[int](obj, `.metadata.name`)
+	_, err = jq.Query[int](obj, `.metadata.name`)
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("expected type int"))
 }
 
-func TestQueryTyped_NilResult(t *testing.T) {
+func TestQuery_NilResult(t *testing.T) {
 	g := NewWithT(t)
 
 	obj, err := resources.YAMLToUnstructured(configMapSimple)
 	g.Expect(err).NotTo(HaveOccurred())
 
-	result, err := jq.QueryTyped[string](obj, `.nonexistent`)
+	result, err := jq.Query[string](obj, `.nonexistent`)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(result).To(BeZero())
 }
 
-func TestQueryTyped_InvalidExpression(t *testing.T) {
+func TestQuery_InvalidExpression(t *testing.T) {
 	g := NewWithT(t)
 
 	obj, err := resources.YAMLToUnstructured(configMapSimple)
 	g.Expect(err).NotTo(HaveOccurred())
 
-	_, err = jq.QueryTyped[string](obj, `invalid {{{`)
+	_, err = jq.Query[string](obj, `invalid {{{`)
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("failed to parse jq expression"))
 }

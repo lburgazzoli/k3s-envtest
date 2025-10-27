@@ -269,21 +269,21 @@ func testAdmissionWebhookConfiguration(
 	unstructuredWebhook, err := resources.ToUnstructured(installedWebhook)
 	g.Expect(err).NotTo(HaveOccurred())
 
-	url, err := jq.QueryTyped[string](
+	url, err := jq.Query[string](
 		unstructuredWebhook,
 		`.webhooks[0].clientConfig.url`,
 	)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(url).To(Equal("https://host.testcontainers.internal:9443" + expectedPath))
 
-	caBundle, err := jq.QueryTyped[string](
+	caBundle, err := jq.Query[string](
 		unstructuredWebhook,
 		`.webhooks[0].clientConfig.caBundle`,
 	)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(caBundle).NotTo(BeEmpty())
 
-	service, err := jq.Query(
+	service, err := jq.Query[any](
 		unstructuredWebhook,
 		`.webhooks[0].clientConfig.service`,
 	)
@@ -386,21 +386,21 @@ func TestInstallWebhooks_ConvertibleCRD_ConfiguresConversionEndpoint(t *testing.
 	unstructuredCRD, err := resources.ToUnstructured(updatedCRD)
 	g.Expect(err).NotTo(HaveOccurred())
 
-	strategy, err := jq.QueryTyped[string](
+	strategy, err := jq.Query[string](
 		unstructuredCRD,
 		`.spec.conversion.strategy`,
 	)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(strategy).To(Equal("Webhook"))
 
-	url, err := jq.QueryTyped[string](
+	url, err := jq.Query[string](
 		unstructuredCRD,
 		`.spec.conversion.webhook.clientConfig.url`,
 	)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(url).To(ContainSubstring("https://host.testcontainers.internal:9443/convert"))
 
-	caBundle, err := jq.QueryTyped[string](
+	caBundle, err := jq.Query[string](
 		unstructuredCRD,
 		`.spec.conversion.webhook.clientConfig.caBundle`,
 	)
@@ -447,7 +447,7 @@ func TestInstallWebhooks_NonConvertibleCRD_SkipsConversion(t *testing.T) {
 	unstructuredCRD, err := resources.ToUnstructured(updatedCRD)
 	g.Expect(err).NotTo(HaveOccurred())
 
-	strategy, err := jq.QueryTyped[string](
+	strategy, err := jq.Query[string](
 		unstructuredCRD,
 		`.spec.conversion.strategy`,
 	)
@@ -530,7 +530,7 @@ func TestInstallWebhooks_WebhookWithDefaultPath_UsesSlash(t *testing.T) {
 	unstructuredWebhook, err := resources.ToUnstructured(installedWebhook)
 	g.Expect(err).NotTo(HaveOccurred())
 
-	url, err := jq.QueryTyped[string](
+	url, err := jq.Query[string](
 		unstructuredWebhook,
 		`.webhooks[0].clientConfig.url`,
 	)

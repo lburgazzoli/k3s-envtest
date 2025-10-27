@@ -38,50 +38,35 @@ func Transform(
 	return nil
 }
 
-// Query executes a JQ query and returns the raw result.
-// For type-safe queries, use the generic QueryTyped, QuerySlice, or QueryMap functions.
-func Query(
+// Query executes a JQ query and returns a typed result.
+// Use any as the type parameter for untyped queries.
+//
+// Example:
+//
+//	name, err := jq.Query[string](obj, `.metadata.name`)
+//	enabled, err := jq.Query[bool](obj, `.spec.enabled`)
+//	result, err := jq.Query[any](obj, `.metadata`)  // untyped
+func Query[T any](
 	obj *unstructured.Unstructured,
 	expression string,
-	args ...interface{},
-) (interface{}, error) {
+	args ...any,
+) (T, error) {
+	var zero T
 	query, err := gojq.Parse(fmt.Sprintf(expression, args...))
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse jq expression: %w", err)
+		return zero, fmt.Errorf("failed to parse jq expression: %w", err)
 	}
 
 	result, ok := query.Run(obj.Object).Next()
 	if !ok {
-		// No result from query is not an error
-		//nolint:nilnil
-		return nil, nil
+		return zero, nil
 	}
 
 	if err, ok := result.(error); ok {
-		return nil, fmt.Errorf("jq execution error: %w", err)
+		return zero, fmt.Errorf("jq execution error: %w", err)
 	}
 
-	return result, nil
-}
-
-// QueryTyped executes a JQ query and returns a typed single value.
-// Use this when you know the expected return type at compile time.
-//
-// Example:
-//
-//	name, err := jq.QueryTyped[string](obj, `.metadata.name`)
-//	enabled, err := jq.QueryTyped[bool](obj, `.spec.enabled`)
-func QueryTyped[T any](
-	obj *unstructured.Unstructured,
-	expression string,
-	args ...interface{},
-) (T, error) {
-	var zero T
-	result, err := Query(obj, expression, args...)
-	if err != nil {
-		return zero, err
-	}
-
+	// Handle nil result
 	if result == nil {
 		return zero, nil
 	}
@@ -104,9 +89,9 @@ func QueryTyped[T any](
 func QuerySlice[T any](
 	obj *unstructured.Unstructured,
 	expression string,
-	args ...interface{},
+	args ...any,
 ) ([]T, error) {
-	result, err := Query(obj, expression, args...)
+	result, err := Query[any](obj, expression, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -142,9 +127,9 @@ func QuerySlice[T any](
 func QueryMap[K comparable, V any](
 	obj *unstructured.Unstructured,
 	expression string,
-	args ...interface{},
+	args ...any,
 ) (map[K]V, error) {
-	result, err := Query(obj, expression, args...)
+	result, err := Query[any](obj, expression, args...)
 	if err != nil {
 		return nil, err
 	}
