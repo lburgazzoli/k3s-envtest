@@ -25,9 +25,39 @@ const (
 	CRDReadyTimeout            = 30 * time.Second
 )
 
-// Logger is a simple interface compatible with testing.T and most logging frameworks.
+// Logger is a simple interface for structured logging, designed to be compatible
+// with testing.T's Logf method. This allows tests to easily capture k3senv debug
+// output without additional configuration.
+//
+// Usage with testing.T (most common):
+//
+//	env, err := k3senv.New(k3senv.WithLogger(t))
+//
+// Usage with standard library log:
+//
+//	logger := log.New(os.Stderr, "[k3senv] ", log.LstdFlags)
+//	env, err := k3senv.New(k3senv.WithLogger(k3senv.LoggerFunc(logger.Printf)))
+//
+// Usage with zap or other loggers:
+//
+//	zapLogger, _ := zap.NewDevelopment()
+//	env, err := k3senv.New(k3senv.WithLogger(k3senv.LoggerFunc(zapLogger.Sugar().Infof)))
 type Logger interface {
 	Logf(format string, args ...interface{})
+}
+
+// LoggerFunc is an adapter that allows a printf-style function to be used as a Logger.
+// This makes it easy to integrate with any logging framework that provides a Printf-like method.
+//
+// Example:
+//
+//	logger := log.New(os.Stderr, "[k3senv] ", log.LstdFlags)
+//	env, err := k3senv.New(k3senv.WithLogger(k3senv.LoggerFunc(logger.Printf)))
+type LoggerFunc func(format string, args ...interface{})
+
+// Logf implements the Logger interface by calling the underlying function.
+func (f LoggerFunc) Logf(format string, args ...interface{}) {
+	f(format, args...)
 }
 
 type Option interface {

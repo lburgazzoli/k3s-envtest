@@ -251,6 +251,33 @@ func TestLogger_TestingTCompatibility(t *testing.T) {
 	})
 }
 
+func TestLoggerFunc(t *testing.T) {
+	g := NewWithT(t)
+
+	// Test that LoggerFunc can wrap a Printf-style function
+	var logMessages []string
+	printfFunc := func(format string, args ...interface{}) {
+		logMessages = append(logMessages, fmt.Sprintf(format, args...))
+	}
+
+	// Create LoggerFunc from the printf function
+	logger := k3senv.LoggerFunc(printfFunc)
+
+	// Verify it implements Logger interface
+	var _ k3senv.Logger = logger
+
+	// Test logging
+	logger.Logf("test message: %s %d", "hello", 42)
+
+	g.Expect(logMessages).To(HaveLen(1))
+	g.Expect(logMessages[0]).To(Equal("test message: hello 42"))
+
+	// Test with k3senv.New
+	env, err := k3senv.New(k3senv.WithLogger(logger))
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(env).NotTo(BeNil())
+}
+
 // mockLogger implements the Logger interface for testing.
 type mockLogger struct {
 	messages *[]string
