@@ -1,6 +1,7 @@
 package k3senv
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -395,4 +396,56 @@ func LoadConfigFromEnv() (*Options, error) {
 	}
 
 	return &opts, nil
+}
+
+// validate checks that all configuration values are valid.
+// Returns an error if any configuration is invalid or out of acceptable range.
+func (opts *Options) validate() error {
+	// Webhook port must be in valid range
+	if opts.Webhook.Port < 1 || opts.Webhook.Port > 65535 {
+		return fmt.Errorf(
+			"webhook port must be 1-65535, got %d (use FindAvailablePort() for parallel tests)",
+			opts.Webhook.Port,
+		)
+	}
+
+	// K3s image cannot be empty
+	if opts.K3s.Image == "" {
+		return errors.New("k3s image cannot be empty")
+	}
+
+	// Webhook timeouts must be positive
+	if opts.Webhook.ReadyTimeout <= 0 {
+		return fmt.Errorf("webhook ready timeout must be positive, got %v", opts.Webhook.ReadyTimeout)
+	}
+	if opts.Webhook.HealthCheckTimeout <= 0 {
+		return fmt.Errorf("webhook health check timeout must be positive, got %v", opts.Webhook.HealthCheckTimeout)
+	}
+
+	// CRD timeout must be positive
+	if opts.CRD.ReadyTimeout <= 0 {
+		return fmt.Errorf("CRD ready timeout must be positive, got %v", opts.CRD.ReadyTimeout)
+	}
+
+	// Poll intervals must be positive and reasonable (>= 10ms to prevent tight loops)
+	if opts.Webhook.PollInterval <= 0 {
+		return fmt.Errorf("webhook poll interval must be positive, got %v", opts.Webhook.PollInterval)
+	}
+	if opts.Webhook.PollInterval < 10*time.Millisecond {
+		return fmt.Errorf("webhook poll interval too small: %v (minimum: 10ms)", opts.Webhook.PollInterval)
+	}
+
+	if opts.CRD.PollInterval <= 0 {
+		return fmt.Errorf("CRD poll interval must be positive, got %v", opts.CRD.PollInterval)
+	}
+	if opts.CRD.PollInterval < 10*time.Millisecond {
+		return fmt.Errorf("CRD poll interval too small: %v (minimum: 10ms)", opts.CRD.PollInterval)
+	}
+
+	// Certificate validity must be positive
+	if opts.Certificate.Validity <= 0 {
+		return fmt.Errorf("certificate validity must be positive, got %v", opts.Certificate.Validity)
+	}
+
+	return nil
 }

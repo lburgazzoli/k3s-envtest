@@ -352,6 +352,95 @@ func TestWebhookValidation(t *testing.T) {
 }
 ```
 
+### Parallel Testing
+
+k3s-envtest supports running tests in parallel (`t.Parallel()`), but webhook tests require unique ports for each parallel test. The library provides port discovery utilities to handle this automatically.
+
+**Important**: Port 0 (auto-assignment) is not supported because webhook URLs must be constructed before the webhook server starts. Use `FindAvailablePort()` instead.
+
+#### Basic Parallel Testing
+
+```go
+func TestWebhook_Parallel(t *testing.T) {
+    t.Parallel() // Enable parallel execution
+    g := NewWithT(t)
+    
+    // Find an available port for this test
+    port, err := k3senv.FindAvailablePort()
+    g.Expect(err).NotTo(HaveOccurred())
+    
+    env, err := k3senv.New(
+        k3senv.WithWebhookPort(port),
+        k3senv.WithObjects(webhook),
+    )
+    g.Expect(err).NotTo(HaveOccurred())
+    
+    t.Cleanup(func() {
+        _ = env.Stop(context.Background())
+    })
+    
+    err = env.Start(context.Background())
+    g.Expect(err).NotTo(HaveOccurred())
+    
+    // Test your webhook...
+}
+```
+
+#### Port Range Constraints
+
+If you need to constrain ports to a specific range (e.g., firewall rules):
+
+```go
+// Only use ports in allowed range
+port, err := k3senv.FindAvailablePortInRange(9443, 9543)
+if err != nil {
+    t.Skip("No available port in allowed range")
+}
+
+env, err := k3senv.New(k3senv.WithWebhookPort(port))
+```
+
+#### Test Helper Pattern
+
+For multiple parallel tests, create a helper function:
+
+```go
+func setupParallelEnv(t *testing.T, opts ...k3senv.Option) *k3senv.K3sEnv {
+    t.Helper()
+    g := NewWithT(t)
+    
+    // Find available port
+    port, err := k3senv.FindAvailablePort()
+    g.Expect(err).NotTo(HaveOccurred())
+    
+    // Prepend port option
+    allOpts := append([]k3senv.Option{k3senv.WithWebhookPort(port)}, opts...)
+    
+    env, err := k3senv.New(allOpts...)
+    g.Expect(err).NotTo(HaveOccurred())
+    
+    t.Cleanup(func() {
+        _ = env.Stop(context.Background())
+    })
+    
+    return env
+}
+
+func TestWebhookA(t *testing.T) {
+    t.Parallel()
+    env := setupParallelEnv(t, k3senv.WithObjects(webhookA))
+    // Test...
+}
+
+func TestWebhookB(t *testing.T) {
+    t.Parallel()
+    env := setupParallelEnv(t, k3senv.WithObjects(webhookB))
+    // Test...
+}
+```
+
+**Note**: There is a small race condition between finding a port and using it where another process could grab the port. In practice, this is extremely rare and negligible for testing purposes.
+
 ## Troubleshooting
 
 ### Docker Issues

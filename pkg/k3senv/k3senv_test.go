@@ -613,3 +613,40 @@ func TestInstallWebhooks_MultipleWebhooks_ConfiguresAll(t *testing.T) {
 	g.Expect(caBundles[1]).NotTo(BeEmpty())
 	g.Expect(caBundles[0]).To(Equal(caBundles[1]))
 }
+
+func TestNew_InvalidPort(t *testing.T) {
+	tests := []struct {
+		name string
+		port int
+	}{
+		{"zero port", 0},
+		{"negative port", -1},
+		{"port too high", 70000},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			_, err := k3senv.New(k3senv.WithWebhookPort(tt.port))
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(err.Error()).To(ContainSubstring("webhook port must be 1-65535"))
+			g.Expect(err.Error()).To(ContainSubstring("FindAvailablePort"))
+		})
+	}
+}
+
+func TestNew_EmptyImage(t *testing.T) {
+	g := NewWithT(t)
+
+	_, err := k3senv.New(k3senv.WithK3sImage(""))
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("k3s image cannot be empty"))
+}
+
+func TestNew_NegativeCertValidity(t *testing.T) {
+	g := NewWithT(t)
+
+	_, err := k3senv.New(k3senv.WithCertValidity(-1))
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("certificate validity must be positive"))
+}
