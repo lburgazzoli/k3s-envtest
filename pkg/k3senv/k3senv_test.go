@@ -29,6 +29,209 @@ func init() {
 	log.SetLogger(zap.New(zap.UseDevMode(true)))
 }
 
+// Test constants.
+const (
+	testCRDGroup            = "example.k3senv.io"
+	testCRDName             = "sampleresources.example.k3senv.io"
+	testCRDKind             = "SampleResource"
+	testWebhookValidatePath = "/validate"
+	testWebhookMutatePath   = "/mutate"
+)
+
+// Test helpers.
+
+func setupTestScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	g := NewWithT(t)
+	scheme := runtime.NewScheme()
+	g.Expect(apiextensionsv1.AddToScheme(scheme)).To(Succeed())
+	g.Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+	g.Expect(v1beta1.AddToScheme(scheme)).To(Succeed())
+	return scheme
+}
+
+// Test fixtures.
+
+func newTestCRDWithConversion() *apiextensionsv1.CustomResourceDefinition {
+	return &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: testCRDName,
+		},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: testCRDGroup,
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Kind:     testCRDKind,
+				ListKind: testCRDKind + "List",
+				Plural:   "sampleresources",
+				Singular: "sampleresource",
+			},
+			Scope: apiextensionsv1.NamespaceScoped,
+			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: false,
+					Schema: &apiextensionsv1.CustomResourceValidation{
+						OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
+							Type: "object",
+							Properties: map[string]apiextensionsv1.JSONSchemaProps{
+								"spec": {
+									Type: "object",
+									Properties: map[string]apiextensionsv1.JSONSchemaProps{
+										"fieldAlpha": {Type: "string"},
+									},
+								},
+								"status": {
+									Type: "object",
+									Properties: map[string]apiextensionsv1.JSONSchemaProps{
+										"conditions": {
+											Type: "array",
+											Items: &apiextensionsv1.JSONSchemaPropsOrArray{
+												Schema: &apiextensionsv1.JSONSchemaProps{Type: "object"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					Name:    "v1beta1",
+					Served:  true,
+					Storage: true,
+					Schema: &apiextensionsv1.CustomResourceValidation{
+						OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
+							Type: "object",
+							Properties: map[string]apiextensionsv1.JSONSchemaProps{
+								"spec": {
+									Type: "object",
+									Properties: map[string]apiextensionsv1.JSONSchemaProps{
+										"fieldBeta": {Type: "string"},
+									},
+								},
+								"status": {
+									Type: "object",
+									Properties: map[string]apiextensionsv1.JSONSchemaProps{
+										"conditions": {
+											Type: "array",
+											Items: &apiextensionsv1.JSONSchemaPropsOrArray{
+												Schema: &apiextensionsv1.JSONSchemaProps{Type: "object"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func newTestCRDNonConvertible() *apiextensionsv1.CustomResourceDefinition {
+	return &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "nonconvertibles.example.com",
+		},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: "example.com",
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Kind:     "NonConvertible",
+				ListKind: "NonConvertibleList",
+				Plural:   "nonconvertibles",
+				Singular: "nonconvertible",
+			},
+			Scope: apiextensionsv1.NamespaceScoped,
+			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1",
+					Served:  true,
+					Storage: true,
+					Schema: &apiextensionsv1.CustomResourceValidation{
+						OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
+							Type: "object",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func newTestValidatingWebhook(name string, path string) *admissionv1.ValidatingWebhookConfiguration {
+	failurePolicy := admissionv1.Fail
+	sideEffects := admissionv1.SideEffectClassNone
+
+	return &admissionv1.ValidatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+		Webhooks: []admissionv1.ValidatingWebhook{
+			{
+				Name: "validate.example.com",
+				ClientConfig: admissionv1.WebhookClientConfig{
+					Service: &admissionv1.ServiceReference{
+						Namespace: "default",
+						Name:      "webhook-service",
+						Path:      ptr.To(path),
+					},
+				},
+				Rules: []admissionv1.RuleWithOperations{
+					{
+						Operations: []admissionv1.OperationType{admissionv1.Create},
+						Rule: admissionv1.Rule{
+							APIGroups:   []string{""},
+							APIVersions: []string{"v1"},
+							Resources:   []string{"pods"},
+						},
+					},
+				},
+				FailurePolicy:           &failurePolicy,
+				SideEffects:             &sideEffects,
+				AdmissionReviewVersions: []string{"v1"},
+			},
+		},
+	}
+}
+
+func newTestMutatingWebhook(name string, path string) *admissionv1.MutatingWebhookConfiguration {
+	failurePolicy := admissionv1.Fail
+	sideEffects := admissionv1.SideEffectClassNone
+
+	return &admissionv1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+		Webhooks: []admissionv1.MutatingWebhook{
+			{
+				Name: "mutate.example.com",
+				ClientConfig: admissionv1.WebhookClientConfig{
+					Service: &admissionv1.ServiceReference{
+						Namespace: "default",
+						Name:      "webhook-service",
+						Path:      ptr.To(path),
+					},
+				},
+				Rules: []admissionv1.RuleWithOperations{
+					{
+						Operations: []admissionv1.OperationType{admissionv1.Create},
+						Rule: admissionv1.Rule{
+							APIGroups:   []string{""},
+							APIVersions: []string{"v1"},
+							Resources:   []string{"pods"},
+						},
+					},
+				},
+				FailurePolicy:           &failurePolicy,
+				SideEffects:             &sideEffects,
+				AdmissionReviewVersions: []string{"v1"},
+			},
+		},
+	}
+}
+
 func testAdmissionWebhookConfiguration(
 	t *testing.T,
 	webhook client.Object,
@@ -157,87 +360,8 @@ func TestInstallWebhooks_ConvertibleCRD_ConfiguresConversionEndpoint(t *testing.
 	g := NewWithT(t)
 	ctx := context.Background()
 
-	scheme := runtime.NewScheme()
-
-	g.Expect(apiextensionsv1.AddToScheme(scheme)).NotTo(HaveOccurred())
-	g.Expect(v1alpha1.AddToScheme(scheme)).NotTo(HaveOccurred())
-	g.Expect(v1beta1.AddToScheme(scheme)).NotTo(HaveOccurred())
-
-	crd := &apiextensionsv1.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "sampleresources.example.k3senv.io",
-		},
-		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
-			Group: "example.k3senv.io",
-			Names: apiextensionsv1.CustomResourceDefinitionNames{
-				Kind:     "SampleResource",
-				ListKind: "SampleResourceList",
-				Plural:   "sampleresources",
-				Singular: "sampleresource",
-			},
-			Scope: apiextensionsv1.NamespaceScoped,
-			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
-				{
-					Name:    "v1alpha1",
-					Served:  true,
-					Storage: false,
-					Schema: &apiextensionsv1.CustomResourceValidation{
-						OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
-							Type: "object",
-							Properties: map[string]apiextensionsv1.JSONSchemaProps{
-								"spec": {
-									Type: "object",
-									Properties: map[string]apiextensionsv1.JSONSchemaProps{
-										"fieldAlpha": {Type: "string"},
-									},
-								},
-								"status": {
-									Type: "object",
-									Properties: map[string]apiextensionsv1.JSONSchemaProps{
-										"conditions": {
-											Type: "array",
-											Items: &apiextensionsv1.JSONSchemaPropsOrArray{
-												Schema: &apiextensionsv1.JSONSchemaProps{Type: "object"},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-				{
-					Name:    "v1beta1",
-					Served:  true,
-					Storage: true,
-					Schema: &apiextensionsv1.CustomResourceValidation{
-						OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
-							Type: "object",
-							Properties: map[string]apiextensionsv1.JSONSchemaProps{
-								"spec": {
-									Type: "object",
-									Properties: map[string]apiextensionsv1.JSONSchemaProps{
-										"fieldBeta": {Type: "string"},
-									},
-								},
-								"status": {
-									Type: "object",
-									Properties: map[string]apiextensionsv1.JSONSchemaProps{
-										"conditions": {
-											Type: "array",
-											Items: &apiextensionsv1.JSONSchemaPropsOrArray{
-												Schema: &apiextensionsv1.JSONSchemaProps{Type: "object"},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
+	scheme := setupTestScheme(t)
+	crd := newTestCRDWithConversion()
 
 	env, err := k3senv.New(
 		k3senv.WithScheme(scheme),
@@ -296,36 +420,9 @@ func TestInstallWebhooks_NonConvertibleCRD_SkipsConversion(t *testing.T) {
 	ctx := context.Background()
 
 	scheme := runtime.NewScheme()
-	err := apiextensionsv1.AddToScheme(scheme)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(apiextensionsv1.AddToScheme(scheme)).To(Succeed())
 
-	crd := &apiextensionsv1.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "nonconvertibles.example.com",
-		},
-		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
-			Group: "example.com",
-			Names: apiextensionsv1.CustomResourceDefinitionNames{
-				Kind:     "NonConvertible",
-				ListKind: "NonConvertibleList",
-				Plural:   "nonconvertibles",
-				Singular: "nonconvertible",
-			},
-			Scope: apiextensionsv1.NamespaceScoped,
-			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
-				{
-					Name:    "v1",
-					Served:  true,
-					Storage: true,
-					Schema: &apiextensionsv1.CustomResourceValidation{
-						OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
-							Type: "object",
-						},
-					},
-				},
-			},
-		},
-	}
+	crd := newTestCRDNonConvertible()
 
 	env, err := k3senv.New(
 		k3senv.WithScheme(scheme),
@@ -359,79 +456,13 @@ func TestInstallWebhooks_NonConvertibleCRD_SkipsConversion(t *testing.T) {
 }
 
 func TestInstallWebhooks_ValidatingWebhook_ConfiguresURLAndCA(t *testing.T) {
-	failurePolicy := admissionv1.Fail
-	sideEffects := admissionv1.SideEffectClassNone
-
-	webhook := &admissionv1.ValidatingWebhookConfiguration{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-validating-webhook",
-		},
-		Webhooks: []admissionv1.ValidatingWebhook{
-			{
-				Name: "validate.example.com",
-				ClientConfig: admissionv1.WebhookClientConfig{
-					Service: &admissionv1.ServiceReference{
-						Namespace: "default",
-						Name:      "webhook-service",
-						Path:      ptr.To("/validate"),
-					},
-				},
-				Rules: []admissionv1.RuleWithOperations{
-					{
-						Operations: []admissionv1.OperationType{admissionv1.Create},
-						Rule: admissionv1.Rule{
-							APIGroups:   []string{""},
-							APIVersions: []string{"v1"},
-							Resources:   []string{"pods"},
-						},
-					},
-				},
-				FailurePolicy:           &failurePolicy,
-				SideEffects:             &sideEffects,
-				AdmissionReviewVersions: []string{"v1"},
-			},
-		},
-	}
-
-	testAdmissionWebhookConfiguration(t, webhook, "/validate")
+	webhook := newTestValidatingWebhook("test-validating-webhook", testWebhookValidatePath)
+	testAdmissionWebhookConfiguration(t, webhook, testWebhookValidatePath)
 }
 
 func TestInstallWebhooks_MutatingWebhook_ConfiguresURLAndCA(t *testing.T) {
-	failurePolicy := admissionv1.Fail
-	sideEffects := admissionv1.SideEffectClassNone
-
-	webhook := &admissionv1.MutatingWebhookConfiguration{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-mutating-webhook",
-		},
-		Webhooks: []admissionv1.MutatingWebhook{
-			{
-				Name: "mutate.example.com",
-				ClientConfig: admissionv1.WebhookClientConfig{
-					Service: &admissionv1.ServiceReference{
-						Namespace: "default",
-						Name:      "webhook-service",
-						Path:      ptr.To("/mutate"),
-					},
-				},
-				Rules: []admissionv1.RuleWithOperations{
-					{
-						Operations: []admissionv1.OperationType{admissionv1.Create},
-						Rule: admissionv1.Rule{
-							APIGroups:   []string{""},
-							APIVersions: []string{"v1"},
-							Resources:   []string{"pods"},
-						},
-					},
-				},
-				FailurePolicy:           &failurePolicy,
-				SideEffects:             &sideEffects,
-				AdmissionReviewVersions: []string{"v1"},
-			},
-		},
-	}
-
-	testAdmissionWebhookConfiguration(t, webhook, "/mutate")
+	webhook := newTestMutatingWebhook("test-mutating-webhook", testWebhookMutatePath)
+	testAdmissionWebhookConfiguration(t, webhook, testWebhookMutatePath)
 }
 
 func TestInstallWebhooks_WebhookWithDefaultPath_UsesSlash(t *testing.T) {
