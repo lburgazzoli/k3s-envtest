@@ -350,6 +350,66 @@ func (l *LoggerOption) ApplyToOptions(o *Options) {
 	o.Logger = l.logger
 }
 
+type WebhookReadyTimeoutOption struct {
+	duration time.Duration
+}
+
+func WithWebhookReadyTimeout(duration time.Duration) Option {
+	return &WebhookReadyTimeoutOption{duration: duration}
+}
+
+func (w *WebhookReadyTimeoutOption) ApplyToOptions(o *Options) {
+	o.Webhook.ReadyTimeout = w.duration
+}
+
+type WebhookHealthCheckTimeoutOption struct {
+	duration time.Duration
+}
+
+func WithWebhookHealthCheckTimeout(duration time.Duration) Option {
+	return &WebhookHealthCheckTimeoutOption{duration: duration}
+}
+
+func (w *WebhookHealthCheckTimeoutOption) ApplyToOptions(o *Options) {
+	o.Webhook.HealthCheckTimeout = w.duration
+}
+
+type WebhookPollIntervalOption struct {
+	duration time.Duration
+}
+
+func WithWebhookPollInterval(duration time.Duration) Option {
+	return &WebhookPollIntervalOption{duration: duration}
+}
+
+func (w *WebhookPollIntervalOption) ApplyToOptions(o *Options) {
+	o.Webhook.PollInterval = w.duration
+}
+
+type CRDReadyTimeoutOption struct {
+	duration time.Duration
+}
+
+func WithCRDReadyTimeout(duration time.Duration) Option {
+	return &CRDReadyTimeoutOption{duration: duration}
+}
+
+func (c *CRDReadyTimeoutOption) ApplyToOptions(o *Options) {
+	o.CRD.ReadyTimeout = c.duration
+}
+
+type CRDPollIntervalOption struct {
+	duration time.Duration
+}
+
+func WithCRDPollInterval(duration time.Duration) Option {
+	return &CRDPollIntervalOption{duration: duration}
+}
+
+func (c *CRDPollIntervalOption) ApplyToOptions(o *Options) {
+	o.CRD.PollInterval = c.duration
+}
+
 // LoadConfigFromEnv loads configuration from environment variables with K3SENV_ prefix
 // and returns an Options struct that can be used with New().
 func LoadConfigFromEnv() (*Options, error) {

@@ -614,6 +614,8 @@ func TestInstallWebhooks_MultipleWebhooks_ConfiguresAll(t *testing.T) {
 	g.Expect(caBundles[0]).To(Equal(caBundles[1]))
 }
 
+// Validation Tests
+
 func TestNew_InvalidPort(t *testing.T) {
 	tests := []struct {
 		name string
@@ -649,4 +651,107 @@ func TestNew_NegativeCertValidity(t *testing.T) {
 	_, err := k3senv.New(k3senv.WithCertValidity(-1))
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("certificate validity must be positive"))
+}
+
+func TestNew_NegativeTimeout(t *testing.T) {
+	tests := []struct {
+		name   string
+		opts   []k3senv.Option
+		errMsg string
+	}{
+		{
+			name: "negative webhook ready timeout",
+			opts: []k3senv.Option{
+				k3senv.WithWebhookReadyTimeout(-1),
+			},
+			errMsg: "webhook ready timeout must be positive",
+		},
+		{
+			name: "negative webhook health check timeout",
+			opts: []k3senv.Option{
+				k3senv.WithWebhookHealthCheckTimeout(-1),
+			},
+			errMsg: "webhook health check timeout must be positive",
+		},
+		{
+			name: "negative CRD ready timeout",
+			opts: []k3senv.Option{
+				k3senv.WithCRDReadyTimeout(-1),
+			},
+			errMsg: "CRD ready timeout must be positive",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			_, err := k3senv.New(tt.opts...)
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(err.Error()).To(ContainSubstring(tt.errMsg))
+		})
+	}
+}
+
+func TestNew_ZeroTimeout(t *testing.T) {
+	tests := []struct {
+		name   string
+		opts   []k3senv.Option
+		errMsg string
+	}{
+		{
+			name: "zero webhook ready timeout",
+			opts: []k3senv.Option{
+				k3senv.WithWebhookReadyTimeout(0),
+			},
+			errMsg: "webhook ready timeout must be positive",
+		},
+		{
+			name: "zero CRD ready timeout",
+			opts: []k3senv.Option{
+				k3senv.WithCRDReadyTimeout(0),
+			},
+			errMsg: "CRD ready timeout must be positive",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			_, err := k3senv.New(tt.opts...)
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(err.Error()).To(ContainSubstring(tt.errMsg))
+		})
+	}
+}
+
+func TestNew_TooSmallPollInterval(t *testing.T) {
+	tests := []struct {
+		name   string
+		opts   []k3senv.Option
+		errMsg string
+	}{
+		{
+			name: "webhook poll interval too small",
+			opts: []k3senv.Option{
+				k3senv.WithWebhookPollInterval(1),
+			},
+			errMsg: "webhook poll interval too small",
+		},
+		{
+			name: "CRD poll interval too small",
+			opts: []k3senv.Option{
+				k3senv.WithCRDPollInterval(1),
+			},
+			errMsg: "CRD poll interval too small",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			_, err := k3senv.New(tt.opts...)
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(err.Error()).To(ContainSubstring(tt.errMsg))
+		})
+	}
 }
