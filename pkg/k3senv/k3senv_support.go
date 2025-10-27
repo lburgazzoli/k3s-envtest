@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -212,27 +213,20 @@ func (e *K3sEnv) waitForWebhookEndpointsReady(
 
 	// Check each webhook endpoint
 	for _, webhookURL := range webhookURLs {
-		// Parse the URL to extract the path
-		// The URL format is https://host:port/path
-		// We need to replace host:port with 127.0.0.1:port since webhook server runs on host
-		var endpointPath string
-		if idx := strings.Index(webhookURL, "://"); idx != -1 {
-			// Skip scheme
-			remaining := webhookURL[idx+3:]
-			// Find the path part (after host:port)
-			if pathIdx := strings.Index(remaining, "/"); pathIdx != -1 {
-				endpointPath = remaining[pathIdx:]
-			} else {
-				endpointPath = "/"
-			}
-		} else {
+		parsedURL, err := url.Parse(webhookURL)
+		if err != nil {
+			return fmt.Errorf("invalid webhook URL %s: %w", webhookURL, err)
+		}
+
+		endpointPath := parsedURL.Path
+		if endpointPath == "" {
 			endpointPath = "/"
 		}
 
 		localURL := fmt.Sprintf("https://127.0.0.1:%d%s", port, endpointPath)
 		e.debugf("Checking webhook endpoint: %s (local: %s)", webhookURL, localURL)
 
-		err := wait.PollUntilContextTimeout(ctx, e.options.Webhook.PollInterval, e.options.Webhook.ReadyTimeout, true, func(ctx context.Context) (bool, error) {
+		err = wait.PollUntilContextTimeout(ctx, e.options.Webhook.PollInterval, e.options.Webhook.ReadyTimeout, true, func(ctx context.Context) (bool, error) {
 			return checkWebhookEndpoint(ctx, localURL, e.options.Webhook.HealthCheckTimeout) == nil, nil
 		})
 
