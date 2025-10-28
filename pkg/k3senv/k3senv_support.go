@@ -138,14 +138,20 @@ func determineConvertibleCRDs(
 
 	var convertibleCRDs []unstructured.Unstructured
 	for _, crd := range crds {
-		group, found, err := unstructured.NestedString(crd.Object, "spec", "group")
-		if err != nil || !found {
+		group, err := jq.Query[string](&crd, `.spec.group`)
+		if err != nil {
 			return nil, fmt.Errorf("failed to extract group from CRD %s: %w", crd.GetName(), err)
 		}
+		if group == "" {
+			return nil, fmt.Errorf("CRD %s missing required field: spec.group", crd.GetName())
+		}
 
-		kind, found, err := unstructured.NestedString(crd.Object, "spec", "names", "kind")
-		if err != nil || !found {
+		kind, err := jq.Query[string](&crd, `.spec.names.kind`)
+		if err != nil {
 			return nil, fmt.Errorf("failed to extract kind from CRD %s: %w", crd.GetName(), err)
+		}
+		if kind == "" {
+			return nil, fmt.Errorf("CRD %s missing required field: spec.names.kind", crd.GetName())
 		}
 
 		if _, ok := convertibles[schema.GroupKind{Group: group, Kind: kind}]; ok {
