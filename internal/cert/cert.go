@@ -28,6 +28,7 @@ const (
 
 // Data contains the certificate and key data in PEM format.
 type Data struct {
+	Path       string
 	CACert     []byte
 	ServerCert []byte
 	ServerKey  []byte
@@ -81,6 +82,7 @@ func New(path string, validity time.Duration, sans []string) (*Data, error) {
 	}
 
 	return &Data{
+		Path:       path,
 		CACert:     caCertPEM,
 		ServerCert: serverCertPEM,
 		ServerKey:  serverKeyPEM,
@@ -88,14 +90,15 @@ func New(path string, validity time.Duration, sans []string) (*Data, error) {
 }
 
 func readFile(path string, elements ...string) ([]byte, error) {
-	pathElements := []string{path}
-	pathElements = append(pathElements, elements...)
+	pathElements := append([]string{path}, elements...)
 	fullPath := filepath.Join(pathElements...)
 
-	//nolint:gosec // filepath.Join cleans the path
+	// filepath.Join cleans the path
+	//nolint:gosec
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file %s: %w", fullPath, err)
 	}
+
 	return data, nil
 }

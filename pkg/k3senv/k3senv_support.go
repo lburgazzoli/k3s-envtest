@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -41,14 +42,14 @@ func determineConvertibleCRDs(
 	crds []unstructured.Unstructured,
 	scheme *runtime.Scheme,
 ) ([]unstructured.Unstructured, error) {
-	convertibles := map[schema.GroupKind]struct{}{}
+	convertibles := sets.New[schema.GroupKind]()
 	for gvk := range scheme.AllKnownTypes() {
 		obj, err := scheme.New(gvk)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create a new API object for %s, %w", gvk, err)
 		}
 		if ok, err := conversion.IsConvertible(scheme, obj); ok && err == nil {
-			convertibles[gvk.GroupKind()] = struct{}{}
+			convertibles.Insert(gvk.GroupKind())
 		}
 	}
 
@@ -70,7 +71,7 @@ func determineConvertibleCRDs(
 			return nil, fmt.Errorf("CRD %s missing required field: spec.names.kind", crd.GetName())
 		}
 
-		if _, ok := convertibles[schema.GroupKind{Group: group, Kind: kind}]; ok {
+		if convertibles.Has(schema.GroupKind{Group: group, Kind: kind}) {
 			convertibleCRDs = append(convertibleCRDs, crd)
 		}
 	}
