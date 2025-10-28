@@ -1,41 +1,23 @@
 package k3senv
 
 import (
-	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
-	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"net/url"
-	"time"
 
 	"github.com/lburgazzoli/k3s-envtest/internal/jq"
 	"github.com/lburgazzoli/k3s-envtest/internal/resources"
+	"github.com/lburgazzoli/k3s-envtest/internal/webhook"
 
+	admissionv1 "k8s.io/api/admission/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
-
-func (e *K3sEnv) createWebhookHTTPClient() (*http.Client, error) {
-	caCertPool := x509.NewCertPool()
-	if !caCertPool.AppendCertsFromPEM(e.certData.CACert) {
-		return nil, errors.New("failed to parse CA certificate")
-	}
-
-	return &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				RootCAs:    caCertPool,
-				MinVersion: tls.VersionTLS12,
-			},
-		},
-	}, nil
-}
 
 func determineConvertibleCRDs(
 	crds []unstructured.Unstructured,
@@ -72,61 +54,6 @@ func determineConvertibleCRDs(
 	return convertibleCRDs, nil
 }
 
-// checkWebhookEndpoint performs a POST request to an HTTPS endpoint with a minimal AdmissionReview body.
-// Returns an error if the endpoint is unreachable or returns a 5xx status code.
-// Accepts 4xx responses since webhooks may reject the test payload but are still healthy.
-func checkWebhookEndpoint(
-	ctx context.Context,
-	client *http.Client,
-	url string,
-	timeout time.Duration,
-) error {
-	// Create child context with timeout for this specific request
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	// Early bailout if context already cancelled
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("context cancelled: %w", err)
-	}
-
-	// Minimal AdmissionReview request for health check.
-	// Webhooks expect POST with AdmissionReview body.
-	body := []byte(`{
-		"apiVersion": "admission.k8s.io/v1",
-		"kind": "AdmissionReview",
-		"request": {
-			"uid": "00000000-0000-0000-0000-000000000000",
-			"operation": "CREATE",
-			"object": {}
-		}
-	}`)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP request to %s: %w", url, err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to connect to webhook endpoint %s: %w", url, err)
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	// Accept 2xx, 3xx, and 4xx status codes.
-	// 4xx means webhook is responding but rejected our test payload (still healthy).
-	// Only fail on 5xx (server errors).
-	if resp.StatusCode >= 500 {
-		return fmt.Errorf("returned error status: %d", resp.StatusCode)
-	}
-
-	return nil
-}
-
 func (e *K3sEnv) waitForWebhookEndpointsReady(
 	ctx context.Context,
 	webhookConfig *unstructured.Unstructured,
@@ -145,10 +72,28 @@ func (e *K3sEnv) waitForWebhookEndpointsReady(
 
 	e.debugf("Checking %d webhook endpoints for %s...", len(webhookURLs), webhookConfig.GetName())
 
-	// Create HTTP client once for all endpoint checks
-	client, err := e.createWebhookHTTPClient()
+	// Create webhook client once for all endpoint checks
+	webhookClient, err := webhook.NewClient(
+		"127.0.0.1",
+		port,
+		webhook.WithClientCACert(e.certData.CACert),
+		webhook.WithClientTimeout(e.options.Webhook.HealthCheckTimeout),
+	)
 	if err != nil {
-		return fmt.Errorf("failed to create webhook HTTP client: %w", err)
+		return fmt.Errorf("failed to create webhook client: %w", err)
+	}
+
+	// Minimal AdmissionReview for health check
+	healthCheckReview := admissionv1.AdmissionReview{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "admission.k8s.io/v1",
+			Kind:       "AdmissionReview",
+		},
+		Request: &admissionv1.AdmissionRequest{
+			UID:       types.UID("00000000-0000-0000-0000-000000000000"),
+			Operation: admissionv1.Create,
+			Object:    runtime.RawExtension{Raw: []byte("{}")},
+		},
 	}
 
 	// Check each webhook endpoint
@@ -163,11 +108,11 @@ func (e *K3sEnv) waitForWebhookEndpointsReady(
 			endpointPath = "/"
 		}
 
-		localURL := fmt.Sprintf("https://127.0.0.1:%d%s", port, endpointPath)
-		e.debugf("Checking webhook endpoint: %s (local: %s)", webhookURL, localURL)
+		e.debugf("Checking webhook endpoint: %s (local path: %s)", webhookURL, endpointPath)
 
 		err = wait.PollUntilContextTimeout(ctx, e.options.Webhook.PollInterval, e.options.Webhook.ReadyTimeout, true, func(ctx context.Context) (bool, error) {
-			return checkWebhookEndpoint(ctx, client, localURL, e.options.Webhook.HealthCheckTimeout) == nil, nil
+			_, err := webhookClient.Call(ctx, endpointPath, healthCheckReview)
+			return err == nil, nil
 		})
 
 		if err != nil {
