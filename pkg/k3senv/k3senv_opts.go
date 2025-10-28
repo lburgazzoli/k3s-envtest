@@ -86,6 +86,14 @@ type Option interface {
 	ApplyToOptions(opts *Options)
 }
 
+// optionFunc is an adapter that allows a simple function to be used as an Option.
+// This enables the functional options pattern with minimal boilerplate.
+type optionFunc func(*Options)
+
+func (f optionFunc) ApplyToOptions(o *Options) {
+	f(o)
+}
+
 // WebhookConfig groups all webhook-related configuration.
 type WebhookConfig struct {
 	Port               int           `mapstructure:"port"`
@@ -206,208 +214,86 @@ func (o *Options) ApplyToOptions(target *Options) {
 
 var _ Option = &Options{}
 
-type Scheme struct {
-	scheme *runtime.Scheme
-}
+// Scheme options
 
 func WithScheme(s *runtime.Scheme) Option {
-	return &Scheme{scheme: s}
+	return optionFunc(func(o *Options) { o.Scheme = s })
 }
 
-func (s *Scheme) ApplyToOptions(o *Options) {
-	o.Scheme = s.scheme
-}
-
-type Manifests struct {
-	paths []string
-}
+// Manifest options
 
 func WithManifests(paths ...string) Option {
-	return &Manifests{paths: paths}
-}
-
-func (m *Manifests) ApplyToOptions(o *Options) {
-	o.Manifest.Paths = append(o.Manifest.Paths, m.paths...)
-}
-
-type CertPath struct {
-	path string
-}
-
-func WithCertPath(path string) Option {
-	return &CertPath{path: path}
-}
-
-func (c *CertPath) ApplyToOptions(o *Options) {
-	o.Certificate.Path = c.path
-}
-
-type Objects struct {
-	objects []client.Object
+	return optionFunc(func(o *Options) { o.Manifest.Paths = append(o.Manifest.Paths, paths...) })
 }
 
 func WithObjects(objects ...client.Object) Option {
-	return &Objects{objects: objects}
+	return optionFunc(func(o *Options) { o.Manifest.Objects = append(o.Manifest.Objects, objects...) })
 }
 
-func (obj *Objects) ApplyToOptions(o *Options) {
-	o.Manifest.Objects = append(o.Manifest.Objects, obj.objects...)
-}
+// Certificate options
 
-type AutoInstallWebhooks struct {
-	enable bool
-}
-
-func WithAutoInstallWebhooks(enable bool) Option {
-	return &AutoInstallWebhooks{enable: enable}
-}
-
-func (a *AutoInstallWebhooks) ApplyToOptions(o *Options) {
-	o.Webhook.AutoInstall = &a.enable
-}
-
-type WebhookPort struct {
-	port int
-}
-
-func WithWebhookPort(port int) Option {
-	return &WebhookPort{port: port}
-}
-
-func (w *WebhookPort) ApplyToOptions(o *Options) {
-	o.Webhook.Port = w.port
-}
-
-type WebhookCheckReadiness struct {
-	enable bool
-}
-
-func WithWebhookCheckReadiness(enable bool) Option {
-	return &WebhookCheckReadiness{enable: enable}
-}
-
-func (w *WebhookCheckReadiness) ApplyToOptions(o *Options) {
-	o.Webhook.CheckReadiness = &w.enable
-}
-
-type K3sImage struct {
-	image string
-}
-
-func WithK3sImage(image string) Option {
-	return &K3sImage{image: image}
-}
-
-func (k *K3sImage) ApplyToOptions(o *Options) {
-	o.K3s.Image = k.image
-}
-
-type K3sArgs struct {
-	args []string
-}
-
-func WithK3sArgs(args ...string) Option {
-	return &K3sArgs{args: args}
-}
-
-func (k *K3sArgs) ApplyToOptions(o *Options) {
-	o.K3s.Args = append(o.K3s.Args, k.args...)
-}
-
-type K3sLogRedirection struct {
-	enable bool
-}
-
-func WithK3sLogRedirection(enable bool) Option {
-	return &K3sLogRedirection{enable: enable}
-}
-
-func (k *K3sLogRedirection) ApplyToOptions(o *Options) {
-	o.K3s.LogRedirection = &k.enable
-}
-
-type CertValidity struct {
-	duration time.Duration
+func WithCertPath(path string) Option {
+	return optionFunc(func(o *Options) { o.Certificate.Path = path })
 }
 
 func WithCertValidity(duration time.Duration) Option {
-	return &CertValidity{duration: duration}
+	return optionFunc(func(o *Options) { o.Certificate.Validity = duration })
 }
 
-func (c *CertValidity) ApplyToOptions(o *Options) {
-	o.Certificate.Validity = c.duration
+// Webhook options
+
+func WithWebhookPort(port int) Option {
+	return optionFunc(func(o *Options) { o.Webhook.Port = port })
 }
 
-type LoggerOption struct {
-	logger Logger
+func WithAutoInstallWebhooks(enable bool) Option {
+	return optionFunc(func(o *Options) { o.Webhook.AutoInstall = &enable })
 }
 
-func WithLogger(logger Logger) Option {
-	return &LoggerOption{logger: logger}
-}
-
-func (l *LoggerOption) ApplyToOptions(o *Options) {
-	o.Logger = l.logger
-}
-
-type WebhookReadyTimeoutOption struct {
-	duration time.Duration
+func WithWebhookCheckReadiness(enable bool) Option {
+	return optionFunc(func(o *Options) { o.Webhook.CheckReadiness = &enable })
 }
 
 func WithWebhookReadyTimeout(duration time.Duration) Option {
-	return &WebhookReadyTimeoutOption{duration: duration}
-}
-
-func (w *WebhookReadyTimeoutOption) ApplyToOptions(o *Options) {
-	o.Webhook.ReadyTimeout = w.duration
-}
-
-type WebhookHealthCheckTimeoutOption struct {
-	duration time.Duration
+	return optionFunc(func(o *Options) { o.Webhook.ReadyTimeout = duration })
 }
 
 func WithWebhookHealthCheckTimeout(duration time.Duration) Option {
-	return &WebhookHealthCheckTimeoutOption{duration: duration}
-}
-
-func (w *WebhookHealthCheckTimeoutOption) ApplyToOptions(o *Options) {
-	o.Webhook.HealthCheckTimeout = w.duration
-}
-
-type WebhookPollIntervalOption struct {
-	duration time.Duration
+	return optionFunc(func(o *Options) { o.Webhook.HealthCheckTimeout = duration })
 }
 
 func WithWebhookPollInterval(duration time.Duration) Option {
-	return &WebhookPollIntervalOption{duration: duration}
+	return optionFunc(func(o *Options) { o.Webhook.PollInterval = duration })
 }
 
-func (w *WebhookPollIntervalOption) ApplyToOptions(o *Options) {
-	o.Webhook.PollInterval = w.duration
-}
-
-type CRDReadyTimeoutOption struct {
-	duration time.Duration
-}
+// CRD options
 
 func WithCRDReadyTimeout(duration time.Duration) Option {
-	return &CRDReadyTimeoutOption{duration: duration}
-}
-
-func (c *CRDReadyTimeoutOption) ApplyToOptions(o *Options) {
-	o.CRD.ReadyTimeout = c.duration
-}
-
-type CRDPollIntervalOption struct {
-	duration time.Duration
+	return optionFunc(func(o *Options) { o.CRD.ReadyTimeout = duration })
 }
 
 func WithCRDPollInterval(duration time.Duration) Option {
-	return &CRDPollIntervalOption{duration: duration}
+	return optionFunc(func(o *Options) { o.CRD.PollInterval = duration })
 }
 
-func (c *CRDPollIntervalOption) ApplyToOptions(o *Options) {
-	o.CRD.PollInterval = c.duration
+// K3s options
+
+func WithK3sImage(image string) Option {
+	return optionFunc(func(o *Options) { o.K3s.Image = image })
+}
+
+func WithK3sArgs(args ...string) Option {
+	return optionFunc(func(o *Options) { o.K3s.Args = append(o.K3s.Args, args...) })
+}
+
+func WithK3sLogRedirection(enable bool) Option {
+	return optionFunc(func(o *Options) { o.K3s.LogRedirection = &enable })
+}
+
+// Logger options
+
+func WithLogger(logger Logger) Option {
+	return optionFunc(func(o *Options) { o.Logger = logger })
 }
 
 // LoadConfigFromEnv loads configuration from environment variables with K3SENV_ prefix
