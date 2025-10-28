@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 
+	"github.com/lburgazzoli/k3s-envtest/internal/gvk"
 	"github.com/lburgazzoli/k3s-envtest/internal/jq"
 	"github.com/lburgazzoli/k3s-envtest/internal/resources"
 	"github.com/lburgazzoli/k3s-envtest/internal/webhook"
@@ -86,8 +87,8 @@ func (e *K3sEnv) waitForWebhookEndpointsReady(
 	// Minimal AdmissionReview for health check
 	healthCheckReview := admissionv1.AdmissionReview{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: "admission.k8s.io/v1",
-			Kind:       "AdmissionReview",
+			APIVersion: gvk.AdmissionReview.GroupVersion().String(),
+			Kind:       gvk.AdmissionReview.Kind,
 		},
 		Request: &admissionv1.AdmissionRequest{
 			UID:       types.UID("00000000-0000-0000-0000-000000000000"),

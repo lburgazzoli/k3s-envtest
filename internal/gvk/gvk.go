@@ -20,4 +20,10 @@ var (
 		Version: "v1",
 		Kind:    "ValidatingWebhookConfiguration",
 	}
+
+	AdmissionReview = schema.GroupVersionKind{
+		Group:   "admission.k8s.io",
+		Version: "v1",
+		Kind:    "AdmissionReview",
+	}
 )
