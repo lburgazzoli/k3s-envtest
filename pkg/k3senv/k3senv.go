@@ -14,6 +14,7 @@ import (
 	"github.com/lburgazzoli/k3s-envtest/internal/gvk"
 	"github.com/lburgazzoli/k3s-envtest/internal/jq"
 	"github.com/lburgazzoli/k3s-envtest/internal/resources"
+	"github.com/lburgazzoli/k3s-envtest/internal/resources/filter"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/k3s"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -475,8 +476,18 @@ func (e *K3sEnv) setupCertificates() error {
 func (e *K3sEnv) prepareManifests() error {
 	e.manifests = []unstructured.Unstructured{}
 
+	// Define the filter for CRDs and webhook configurations
+	manifestFilter := filter.ByType(
+		gvk.CustomResourceDefinition,
+		gvk.MutatingWebhookConfiguration,
+		gvk.ValidatingWebhookConfiguration,
+	)
+
 	if len(e.options.Manifest.Paths) > 0 {
-		manifests, err := loadManifestsFromPaths(e.options.Manifest.Paths)
+		manifests, err := resources.LoadFromPaths(
+			e.options.Manifest.Paths,
+			manifestFilter,
+		)
 		if err != nil {
 			return fmt.Errorf("failed to load manifests from paths %v: %w", e.options.Manifest.Paths, err)
 		}
@@ -484,7 +495,11 @@ func (e *K3sEnv) prepareManifests() error {
 	}
 
 	if len(e.options.Manifest.Objects) > 0 {
-		manifests, err := loadObjectsToManifests(e.options.Scheme, e.options.Manifest.Objects)
+		manifests, err := resources.UnstructuredFromObjects(
+			e.options.Scheme,
+			e.options.Manifest.Objects,
+			manifestFilter,
+		)
 		if err != nil {
 			return fmt.Errorf("failed to load %d runtime objects: %w", len(e.options.Manifest.Objects), err)
 		}

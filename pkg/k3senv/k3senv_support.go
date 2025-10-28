@@ -16,12 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lburgazzoli/k3s-envtest/internal/gvk"
 	"github.com/lburgazzoli/k3s-envtest/internal/jq"
-	"github.com/lburgazzoli/k3s-envtest/internal/resources"
-	"github.com/lburgazzoli/k3s-envtest/internal/testutil"
 	"github.com/mdelapenya/tlscert"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/conversion"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -276,145 +272,6 @@ func extractNames(objs []unstructured.Unstructured) []string {
 		names[i] = objs[i].GetName()
 	}
 	return names
-}
-
-func loadManifestFromFile(
-	filePath string,
-) ([]unstructured.Unstructured, error) {
-	data, err := readFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read file %s: %w", filePath, err)
-	}
-
-	manifests, err := resources.Decode(data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode YAML from %s: %w", filePath, err)
-	}
-
-	var result []unstructured.Unstructured
-	for i := range manifests {
-		gvkType := manifests[i].GroupVersionKind()
-		if gvkType == gvk.CustomResourceDefinition ||
-			gvkType == gvk.MutatingWebhookConfiguration ||
-			gvkType == gvk.ValidatingWebhookConfiguration {
-			result = append(result, manifests[i])
-		}
-	}
-
-	return result, nil
-}
-
-func loadManifestsFromDirFlat(
-	dir string,
-) ([]unstructured.Unstructured, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read directory %s: %w", dir, err)
-	}
-
-	var result []unstructured.Unstructured
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		fileName := entry.Name()
-		ext := strings.ToLower(filepath.Ext(fileName))
-		if ext != ".yaml" && ext != ".yml" {
-			continue
-		}
-
-		filePath := filepath.Join(dir, fileName)
-		manifests, err := loadManifestFromFile(filePath)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, manifests...)
-	}
-
-	return result, nil
-}
-
-func loadManifestPath(
-	path string,
-) ([]unstructured.Unstructured, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("manifest path does not exist: %s", path)
-		}
-		return nil, fmt.Errorf("failed to access manifest path %s: %w", path, err)
-	}
-
-	if info.IsDir() {
-		return loadManifestsFromDirFlat(path)
-	}
-
-	return loadManifestFromFile(path)
-}
-
-func loadObjectsToManifests(
-	scheme *runtime.Scheme,
-	objects []client.Object,
-) ([]unstructured.Unstructured, error) {
-	result := make([]unstructured.Unstructured, 0, len(objects))
-	for _, obj := range objects {
-		if err := resources.EnsureGroupVersionKind(scheme, obj); err != nil {
-			return nil, fmt.Errorf("failed to ensure GVK for object %T: %w", obj, err)
-		}
-
-		u, err := resources.ToUnstructured(obj)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert object to unstructured: %w", err)
-		}
-
-		result = append(result, *u.DeepCopy())
-	}
-
-	return result, nil
-}
-
-func loadManifestsFromPaths(
-	paths []string,
-) ([]unstructured.Unstructured, error) {
-	var result []unstructured.Unstructured
-
-	for _, path := range paths {
-		resolvedPath := path
-		if !filepath.IsAbs(path) {
-			projectRoot, err := testutil.FindProjectRoot()
-			if err != nil {
-				return nil, fmt.Errorf("failed to find project root for relative path %s: %w", path, err)
-			}
-			resolvedPath = filepath.Join(projectRoot, path)
-		}
-
-		if strings.ContainsAny(resolvedPath, "*?[]") {
-			matches, err := filepath.Glob(resolvedPath)
-			if err != nil {
-				return nil, fmt.Errorf("invalid glob pattern %s: %w", resolvedPath, err)
-			}
-			if len(matches) == 0 {
-				return nil, fmt.Errorf("glob pattern matched no files: %s", resolvedPath)
-			}
-
-			for _, match := range matches {
-				manifests, err := loadManifestPath(match)
-				if err != nil {
-					return nil, err
-				}
-				result = append(result, manifests...)
-			}
-		} else {
-			manifests, err := loadManifestPath(resolvedPath)
-			if err != nil {
-				return nil, err
-			}
-			result = append(result, manifests...)
-		}
-	}
-
-	return result, nil
 }
 
 // FindAvailablePort finds an available TCP port on the local machine.
