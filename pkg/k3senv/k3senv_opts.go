@@ -18,7 +18,6 @@ const (
 	DefaultK3sLogRedirection = false
 	DefaultWebhookPort       = 9443
 	DefaultCertDirPrefix     = "/tmp/k3senv-certs-"
-	DefaultCertDirPermission = 0o750 // Owner: rwx, Group: r-x, Other: none
 	DefaultCertValidity      = 24 * time.Hour
 
 	DefaultWebhookPollInterval = 500 * time.Millisecond

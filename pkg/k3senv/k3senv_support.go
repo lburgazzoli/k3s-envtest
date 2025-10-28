@@ -5,19 +5,14 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/lburgazzoli/k3s-envtest/internal/jq"
-	"github.com/mdelapenya/tlscert"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/conversion"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -25,31 +20,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
-
-type CertData struct {
-	CACert     []byte
-	ServerCert []byte
-	ServerKey  []byte
-}
-
-func (cd *CertData) CABundle() []byte {
-	return []byte(base64.StdEncoding.EncodeToString(cd.CACert))
-}
-
-func readFile(path string, elements ...string) ([]byte, error) {
-	pathElements := []string{path}
-	pathElements = append(pathElements, elements...)
-	fullPath := filepath.Join(pathElements...)
-
-	// filepath.Join cleans the path
-	//
-	//nolint:gosec
-	data, err := os.ReadFile(fullPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read file %s: %w", fullPath, err)
-	}
-	return data, nil
-}
 
 func (e *K3sEnv) createWebhookHTTPClient() (*http.Client, error) {
 	caCertPool := x509.NewCertPool()
@@ -64,56 +34,6 @@ func (e *K3sEnv) createWebhookHTTPClient() (*http.Client, error) {
 				MinVersion: tls.VersionTLS12,
 			},
 		},
-	}, nil
-}
-
-func generateCertificates(
-	certPath string,
-	validity time.Duration,
-) (*CertData, error) {
-	if err := os.MkdirAll(certPath, DefaultCertDirPermission); err != nil {
-		return nil, fmt.Errorf("failed to create cert directory: %w", err)
-	}
-
-	caCert := tlscert.SelfSignedFromRequest(tlscert.Request{
-		Name:      "ca",
-		Host:      "k3senv-ca",
-		ValidFor:  validity,
-		IsCA:      true,
-		ParentDir: certPath,
-	})
-
-	serverCert := tlscert.SelfSignedFromRequest(tlscert.Request{
-		Name:      "tls",
-		Host:      strings.Join(CertificateSANs, ","),
-		ValidFor:  validity,
-		Parent:    caCert,
-		ParentDir: certPath,
-	})
-
-	if caCert == nil || serverCert == nil {
-		return nil, errors.New("failed to generate certificates")
-	}
-
-	caCertPEM, err := readFile(certPath, CACertFileName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read CA cert: %w", err)
-	}
-
-	serverCertPEM, err := readFile(certPath, CertFileName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read server cert: %w", err)
-	}
-
-	serverKeyPEM, err := readFile(certPath, KeyFileName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read server key: %w", err)
-	}
-
-	return &CertData{
-		CACert:     caCertPEM,
-		ServerCert: serverCertPEM,
-		ServerKey:  serverKeyPEM,
 	}, nil
 }
 
