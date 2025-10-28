@@ -8,9 +8,10 @@ import (
 
 	"github.com/lburgazzoli/k3s-envtest/internal/resources/filter"
 	"github.com/lburgazzoli/k3s-envtest/internal/testutil"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // loadFromFile loads Kubernetes manifests from a single YAML file and applies the optional filter.
@@ -19,6 +20,7 @@ func loadFromFile(
 	filePath string,
 	objectFilter filter.ObjectFilter,
 ) ([]unstructured.Unstructured, error) {
+	//nolint:gosec // File path comes from trusted source
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file %s: %w", filePath, err)

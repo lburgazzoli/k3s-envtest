@@ -1,3 +1,4 @@
+//nolint:testpackage // Testing unexported functions
 package resources
 
 import (
@@ -7,12 +8,14 @@ import (
 
 	"github.com/lburgazzoli/k3s-envtest/internal/gvk"
 	"github.com/lburgazzoli/k3s-envtest/internal/resources/filter"
-	. "github.com/onsi/gomega"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	. "github.com/onsi/gomega"
 )
 
 const testMultiDocYAML = `apiVersion: apiextensions.k8s.io/v1
@@ -102,7 +105,7 @@ func TestLoadFromDirectory_Success(t *testing.T) {
 	g.Expect(err).NotTo(HaveOccurred())
 	err = os.WriteFile(txtFile, []byte("ignored"), 0o600)
 	g.Expect(err).NotTo(HaveOccurred())
-	err = os.Mkdir(subDir, 0o755)
+	err = os.Mkdir(subDir, 0o750)
 	g.Expect(err).NotTo(HaveOccurred())
 
 	// Load without filter
@@ -201,7 +204,7 @@ func TestUnstructuredFromObjects_Success(t *testing.T) {
 	objectFilter = filter.ByType(podGVK)
 	manifests, err = UnstructuredFromObjects(scheme, objects, objectFilter)
 	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(manifests).To(HaveLen(0))
+	g.Expect(manifests).To(BeEmpty())
 }
 
 func TestUnstructuredFromObjects_EmptyList(t *testing.T) {
@@ -212,5 +215,5 @@ func TestUnstructuredFromObjects_EmptyList(t *testing.T) {
 
 	manifests, err := UnstructuredFromObjects(scheme, objects, nil)
 	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(manifests).To(HaveLen(0))
+	g.Expect(manifests).To(BeEmpty())
 }
