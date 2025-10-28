@@ -13,7 +13,6 @@ import (
 
 	"github.com/lburgazzoli/k3s-envtest/internal/cert"
 	"github.com/lburgazzoli/k3s-envtest/internal/gvk"
-	"github.com/lburgazzoli/k3s-envtest/internal/jq"
 	"github.com/lburgazzoli/k3s-envtest/internal/resources"
 	"github.com/lburgazzoli/k3s-envtest/internal/resources/filter"
 	"github.com/testcontainers/testcontainers-go"
@@ -533,21 +532,7 @@ func (e *K3sEnv) patchAndUpdateCRDConversions(
 			return fmt.Errorf("failed to get CRD %s: %w", crd.GetName(), err)
 		}
 
-		err := jq.Transform(
-			crd, `
-			.spec.conversion = {
-				"strategy": "Webhook",
-				"webhook": {
-					"conversionReviewVersions": ["v1", "v1beta1"],
-					"clientConfig": {
-						"url": "%s",
-						"caBundle": "%s"
-					}
-				}
-			}
-		`, baseURL+WebhookConvertPath, caBundle)
-
-		if err != nil {
+		if err := resources.PatchCRDConversion(crd, baseURL, caBundle); err != nil {
 			return fmt.Errorf("failed to patch CRD %s: %w", crd.GetName(), err)
 		}
 
@@ -621,18 +606,8 @@ func (e *K3sEnv) patchWebhookConfigurations(
 
 	webhookConfigs := e.WebhookConfigs()
 	for i := range webhookConfigs {
-		wh := &webhookConfigs[i]
-
-		err := jq.Transform(wh, `
-			.webhooks |= map(
-				.clientConfig.url = "%s" + (.clientConfig.service.path // "/") |
-				.clientConfig.caBundle = "%s" |
-				del(.clientConfig.service)
-			)
-		`, baseURL, caBundle)
-
-		if err != nil {
-			return nil, fmt.Errorf("failed to patch webhook %s: %w", wh.GetName(), err)
+		if err := resources.PatchWebhookConfiguration(&webhookConfigs[i], baseURL, caBundle); err != nil {
+			return nil, fmt.Errorf("failed to patch webhook %s: %w", webhookConfigs[i].GetName(), err)
 		}
 	}
 
