@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,17 +14,22 @@ import (
 
 	"github.com/lburgazzoli/k3s-envtest/internal/cert"
 	"github.com/lburgazzoli/k3s-envtest/internal/gvk"
+	"github.com/lburgazzoli/k3s-envtest/internal/jq"
 	"github.com/lburgazzoli/k3s-envtest/internal/resources"
 	"github.com/lburgazzoli/k3s-envtest/internal/resources/filter"
+	"github.com/lburgazzoli/k3s-envtest/internal/webhook"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/k3s"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlwebhook "sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	admissionv1 "k8s.io/api/admission/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -354,7 +360,7 @@ func (e *K3sEnv) InstallWebhooks(ctx context.Context) error {
 	}
 
 	crds := e.CRDs()
-	convertibleCRDs, err := determineConvertibleCRDs(crds, e.options.Scheme)
+	convertibleCRDs, err := resources.FilterConvertibleCRDs(e.options.Scheme, crds)
 	if err != nil {
 		return fmt.Errorf("failed to determine convertible CRDs: %w", err)
 	}
@@ -601,6 +607,77 @@ func (e *K3sEnv) patchWebhookConfigurations(
 	}
 
 	return webhookConfigs, nil
+}
+
+func (e *K3sEnv) waitForWebhookEndpointsReady(
+	ctx context.Context,
+	webhookConfig *unstructured.Unstructured,
+	port int,
+) error {
+	// Extract webhook endpoint URLs from the configuration using JQ
+	webhookURLs, err := jq.QuerySlice[string](webhookConfig, `[.webhooks[].clientConfig.url]`)
+	if err != nil {
+		return fmt.Errorf("failed to extract webhook URLs: %w", err)
+	}
+
+	if len(webhookURLs) == 0 {
+		e.debugf("No webhook endpoints found in config %s, skipping health check", webhookConfig.GetName())
+		return nil
+	}
+
+	e.debugf("Checking %d webhook endpoints for %s...", len(webhookURLs), webhookConfig.GetName())
+
+	// Create webhook client once for all endpoint checks
+	webhookClient, err := webhook.NewClient(
+		"127.0.0.1",
+		port,
+		webhook.WithClientCACert(e.certData.CACert),
+		webhook.WithClientTimeout(e.options.Webhook.HealthCheckTimeout),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create webhook client: %w", err)
+	}
+
+	// Minimal AdmissionReview for health check
+	healthCheckReview := admissionv1.AdmissionReview{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: gvk.AdmissionReview.GroupVersion().String(),
+			Kind:       gvk.AdmissionReview.Kind,
+		},
+		Request: &admissionv1.AdmissionRequest{
+			UID:       types.UID("00000000-0000-0000-0000-000000000000"),
+			Operation: admissionv1.Create,
+			Object:    runtime.RawExtension{Raw: []byte("{}")},
+		},
+	}
+
+	// Check each webhook endpoint
+	for _, webhookURL := range webhookURLs {
+		parsedURL, err := url.Parse(webhookURL)
+		if err != nil {
+			return fmt.Errorf("invalid webhook URL %s: %w", webhookURL, err)
+		}
+
+		endpointPath := parsedURL.Path
+		if endpointPath == "" {
+			endpointPath = "/"
+		}
+
+		e.debugf("Checking webhook endpoint: %s (local path: %s)", webhookURL, endpointPath)
+
+		err = wait.PollUntilContextTimeout(ctx, e.options.Webhook.PollInterval, e.options.Webhook.ReadyTimeout, true, func(ctx context.Context) (bool, error) {
+			_, err := webhookClient.Call(ctx, endpointPath, healthCheckReview)
+			return err == nil, nil
+		})
+
+		if err != nil {
+			return fmt.Errorf("webhook endpoint %s not ready: %w", endpointPath, err)
+		}
+
+		e.debugf("Webhook endpoint %s is ready", endpointPath)
+	}
+
+	return nil
 }
 
 // debugf logs a debug message if a logger is configured.
