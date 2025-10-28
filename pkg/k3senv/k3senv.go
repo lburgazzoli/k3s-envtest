@@ -193,7 +193,7 @@ func (e *K3sEnv) Start(ctx context.Context) error {
 	}
 	e.debugf("Loaded %d manifests", len(e.manifests))
 
-	if err := e.installCRDsIfNeeded(ctx); err != nil {
+	if err := e.installCRDs(ctx); err != nil {
 		return err
 	}
 
@@ -500,23 +500,6 @@ func (e *K3sEnv) prepareManifests() error {
 	return nil
 }
 
-func (e *K3sEnv) installCRDsIfNeeded(ctx context.Context) error {
-	crds := e.CRDs()
-	if len(crds) == 0 {
-		return nil
-	}
-
-	if err := e.installCRDs(ctx); err != nil {
-		return fmt.Errorf("failed to install %d CRDs: %w", len(crds), err)
-	}
-
-	if err := e.waitForCRDsEstablished(ctx, extractNames(crds)); err != nil {
-		return fmt.Errorf("failed waiting for CRDs to be established: %w", err)
-	}
-
-	return nil
-}
-
 func (e *K3sEnv) patchAndUpdateCRDConversions(
 	ctx context.Context,
 	convertibleCRDs []unstructured.Unstructured,
@@ -545,17 +528,23 @@ func (e *K3sEnv) patchAndUpdateCRDConversions(
 }
 
 func (e *K3sEnv) installCRDs(ctx context.Context) error {
-	// CRDs() already returns deep copies, no need to copy again
 	crds := e.CRDs()
+	if len(crds) == 0 {
+		return nil
+	}
+
 	for i := range crds {
 		err := e.cli.Create(ctx, &crds[i])
-
 		if err != nil && !k8serr.IsAlreadyExists(err) {
 			return fmt.Errorf("failed to create CRD %s: %w",
 				resources.FormatObjectReference(&crds[i]),
 				err,
 			)
 		}
+	}
+
+	if err := e.waitForCRDsEstablished(ctx, extractNames(crds)); err != nil {
+		return fmt.Errorf("failed waiting for CRDs to be established: %w", err)
 	}
 
 	return nil
