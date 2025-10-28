@@ -9,10 +9,12 @@ import (
 	"gopkg.in/yaml.v3"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/conversion"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 func ToUnstructured(obj any) (*unstructured.Unstructured, error) {
@@ -119,4 +121,20 @@ func Decode(content []byte) ([]unstructured.Unstructured, error) {
 	}
 
 	return results, nil
+}
+
+// AllConvertibleTypes returns a set of all GroupKind types in the scheme
+// that support conversion between versions.
+func AllConvertibleTypes(scheme *runtime.Scheme) (sets.Set[schema.GroupKind], error) {
+	convertibles := sets.New[schema.GroupKind]()
+	for gvk := range scheme.AllKnownTypes() {
+		obj, err := scheme.New(gvk)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create object for %s: %w", gvk, err)
+		}
+		if ok, err := conversion.IsConvertible(scheme, obj); ok && err == nil {
+			convertibles.Insert(gvk.GroupKind())
+		}
+	}
+	return convertibles, nil
 }

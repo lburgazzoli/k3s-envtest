@@ -13,12 +13,11 @@ import (
 	"time"
 
 	"github.com/lburgazzoli/k3s-envtest/internal/jq"
-	"sigs.k8s.io/controller-runtime/pkg/webhook/conversion"
+	"github.com/lburgazzoli/k3s-envtest/internal/resources"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -42,15 +41,9 @@ func determineConvertibleCRDs(
 	crds []unstructured.Unstructured,
 	scheme *runtime.Scheme,
 ) ([]unstructured.Unstructured, error) {
-	convertibles := sets.New[schema.GroupKind]()
-	for gvk := range scheme.AllKnownTypes() {
-		obj, err := scheme.New(gvk)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create a new API object for %s, %w", gvk, err)
-		}
-		if ok, err := conversion.IsConvertible(scheme, obj); ok && err == nil {
-			convertibles.Insert(gvk.GroupKind())
-		}
+	convertibles, err := resources.AllConvertibleTypes(scheme)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine convertible types: %w", err)
 	}
 
 	var convertibleCRDs []unstructured.Unstructured
