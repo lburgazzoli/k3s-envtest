@@ -3,17 +3,7 @@ package k3senv
 import (
 	"fmt"
 	"net"
-
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
-
-func extractNames(objs []unstructured.Unstructured) []string {
-	names := make([]string, len(objs))
-	for i := range objs {
-		names[i] = objs[i].GetName()
-	}
-	return names
-}
 
 // FindAvailablePort finds an available TCP port on the local machine.
 //
@@ -42,7 +32,11 @@ func FindAvailablePort() (int, error) {
 		_ = listener.Close()
 	}()
 
-	addr := listener.Addr().(*net.TCPAddr)
+	addr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		return 0, fmt.Errorf("unexpected address type: %T", listener.Addr())
+	}
+
 	return addr.Port, nil
 }
 

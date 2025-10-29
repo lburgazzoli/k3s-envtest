@@ -11,9 +11,14 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	admissionv1 "k8s.io/api/admission/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // Client is a webhook testing client that simplifies making calls to
@@ -33,16 +38,15 @@ type Client struct {
 //	// Functional style
 //	client, err := webhook.NewClient("localhost", 9443,
 //	    webhook.WithClientCACert(caCert),
-//	    webhook.WithClientTimeout(10*time.Second),
 //	)
 //
 //	// Struct style
 //	client, err := webhook.NewClient("localhost", 9443, &webhook.ClientOptions{
-//	    CACert:  caCert,
-//	    Timeout: 10 * time.Second,
+//	    CACert: caCert,
 //	})
 //
 // If no CA certificate is provided, the client will skip TLS verification (insecure).
+// Per-call timeouts can be configured using WithCallTimeout() when calling Call().
 func NewClient(host string, port int, opts ...ClientOption) (*Client, error) {
 	if host == "" {
 		return nil, errors.New("host cannot be empty")
@@ -51,9 +55,7 @@ func NewClient(host string, port int, opts ...ClientOption) (*Client, error) {
 		return nil, fmt.Errorf("invalid port: %d (must be 1-65535)", port)
 	}
 
-	options := &ClientOptions{
-		Timeout: DefaultTimeout,
-	}
+	options := &ClientOptions{}
 	options.ApplyOptions(opts)
 
 	tlsConfig, err := buildTLSConfig(options)
@@ -62,7 +64,6 @@ func NewClient(host string, port int, opts ...ClientOption) (*Client, error) {
 	}
 
 	httpClient := &http.Client{
-		Timeout: options.Timeout,
 		Transport: &http.Transport{
 			TLSClientConfig: tlsConfig,
 		},
@@ -81,8 +82,29 @@ func (c *Client) Address() string {
 	return net.JoinHostPort(c.host, strconv.Itoa(c.port))
 }
 
+// newHealthCheckReview creates a minimal AdmissionReview for health checking webhook endpoints.
+func newHealthCheckReview() admissionv1.AdmissionReview {
+	return admissionv1.AdmissionReview{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "admission.k8s.io/v1",
+			Kind:       "AdmissionReview",
+		},
+		Request: &admissionv1.AdmissionRequest{
+			UID:       types.UID("00000000-0000-0000-0000-000000000000"),
+			Operation: admissionv1.Create,
+			Object:    runtime.RawExtension{Raw: []byte("{}")},
+		},
+	}
+}
+
 // Call sends an AdmissionReview request to the specified webhook path and
 // returns the AdmissionReview response.
+//
+// Options can be provided to override the default settings:
+//
+//	response, err := client.Call(ctx, "/validate", review,
+//	    webhook.WithCallTimeout(5*time.Second),
+//	)
 //
 // The method POSTs the review as JSON to https://{host}:{port}{path} and
 // parses the response. It returns an error for 5xx status codes but accepts
@@ -92,7 +114,22 @@ func (c *Client) Call(
 	ctx context.Context,
 	path string,
 	review admissionv1.AdmissionReview,
+	opts ...CallOption,
 ) (*admissionv1.AdmissionReview, error) {
+	callOpts := &CallOptions{
+		Timeout: DefaultCallTimeout,
+	}
+	for _, opt := range opts {
+		opt.ApplyToCallOptions(callOpts)
+	}
+
+	// Apply timeout to context if specified
+	if callOpts.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, callOpts.Timeout)
+		defer cancel()
+	}
+
 	if path == "" {
 		path = "/"
 	}
@@ -137,21 +174,81 @@ func (c *Client) Call(
 	return &reviewResp, nil
 }
 
+// WaitForEndpoints polls the given webhook URLs until they respond successfully
+// or the context times out. It extracts the path from each URL and calls the
+// webhook endpoint with a health check AdmissionReview.
+//
+// Options can be provided to configure polling behavior:
+//
+//	err := client.WaitForEndpoints(ctx, webhookURLs,
+//	    webhook.WithPollInterval(200*time.Millisecond),
+//	    webhook.WithReadyTimeout(60*time.Second),
+//	    webhook.WithWaitCallTimeout(5*time.Second),
+//	)
+//
+// The method will wait for each endpoint sequentially in the order provided.
+func (c *Client) WaitForEndpoints(
+	ctx context.Context,
+	webhookURLs []string,
+	opts ...WaitOption,
+) error {
+	waitOpts := &WaitOptions{
+		PollInterval: DefaultPollInterval,
+		ReadyTimeout: DefaultReadyTimeout,
+		CallTimeout:  DefaultCallTimeout,
+	}
+	waitOpts.ApplyOptions(opts)
+
+	healthCheckReview := newHealthCheckReview()
+
+	for _, webhookURL := range webhookURLs {
+		parsedURL, err := url.Parse(webhookURL)
+		if err != nil {
+			return fmt.Errorf("invalid webhook URL %s: %w", webhookURL, err)
+		}
+
+		path := parsedURL.Path
+		if path == "" {
+			path = "/"
+		}
+
+		err = wait.PollUntilContextTimeout(
+			ctx,
+			waitOpts.PollInterval,
+			waitOpts.ReadyTimeout,
+			true,
+			func(ctx context.Context) (bool, error) {
+				_, err := c.Call(ctx, path, healthCheckReview, WithCallTimeout(waitOpts.CallTimeout))
+				return err == nil, nil
+			},
+		)
+
+		if err != nil {
+			return fmt.Errorf("webhook endpoint %s not ready: %w", path, err)
+		}
+	}
+
+	return nil
+}
+
 func buildTLSConfig(opts *ClientOptions) (*tls.Config, error) {
+	cfg := tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+
 	if len(opts.CACert) > 0 {
 		caCertPool := x509.NewCertPool()
 		if !caCertPool.AppendCertsFromPEM(opts.CACert) {
 			return nil, errors.New("failed to parse CA certificate")
 		}
-		return &tls.Config{
-			RootCAs:    caCertPool,
-			MinVersion: tls.VersionTLS12,
-		}, nil
+
+		cfg.RootCAs = caCertPool
+	} else {
+		// InsecureSkipVerify is intentional for testing without CA certs
+		//
+		//nolint:gosec
+		cfg.InsecureSkipVerify = true
 	}
 
-	//nolint:gosec // InsecureSkipVerify is intentional for testing without CA certs
-	return &tls.Config{
-		InsecureSkipVerify: true,
-		MinVersion:         tls.VersionTLS12,
-	}, nil
+	return &cfg, nil
 }

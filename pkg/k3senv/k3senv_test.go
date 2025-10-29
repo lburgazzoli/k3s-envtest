@@ -4,8 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/lburgazzoli/k3s-envtest/internal/jq"
-	"github.com/lburgazzoli/k3s-envtest/internal/resources"
 	"github.com/lburgazzoli/k3s-envtest/internal/testdata/v1alpha1"
 	"github.com/lburgazzoli/k3s-envtest/internal/testdata/v1beta1"
 	"github.com/lburgazzoli/k3s-envtest/pkg/k3senv"
@@ -266,29 +264,27 @@ func testAdmissionWebhookConfiguration(
 	err = env.Client().Get(ctx, client.ObjectKey{Name: webhook.GetName()}, installedWebhook)
 	g.Expect(err).NotTo(HaveOccurred())
 
-	unstructuredWebhook, err := resources.ToUnstructured(installedWebhook)
-	g.Expect(err).NotTo(HaveOccurred())
+	expectedURL := "https://host.testcontainers.internal:9443" + expectedPath
 
-	url, err := jq.Query[string](
-		unstructuredWebhook,
-		`.webhooks[0].clientConfig.url`,
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(url).To(Equal("https://host.testcontainers.internal:9443" + expectedPath))
-
-	caBundle, err := jq.Query[string](
-		unstructuredWebhook,
-		`.webhooks[0].clientConfig.caBundle`,
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(caBundle).NotTo(BeEmpty())
-
-	service, err := jq.Query[any](
-		unstructuredWebhook,
-		`.webhooks[0].clientConfig.service`,
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(service).To(BeNil())
+	// Use type switch to handle both webhook types
+	switch wh := installedWebhook.(type) {
+	case *admissionv1.ValidatingWebhookConfiguration:
+		g.Expect(wh.Webhooks).To(ContainElement(MatchFields(IgnoreExtras, Fields{
+			"ClientConfig": MatchFields(IgnoreExtras, Fields{
+				"URL":      PointTo(Equal(expectedURL)),
+				"CABundle": Not(BeEmpty()),
+				"Service":  BeNil(),
+			}),
+		})))
+	case *admissionv1.MutatingWebhookConfiguration:
+		g.Expect(wh.Webhooks).To(ContainElement(MatchFields(IgnoreExtras, Fields{
+			"ClientConfig": MatchFields(IgnoreExtras, Fields{
+				"URL":      PointTo(Equal(expectedURL)),
+				"CABundle": Not(BeEmpty()),
+				"Service":  BeNil(),
+			}),
+		})))
+	}
 }
 
 func TestK3sEnv_GetKubeconfig_Success(t *testing.T) {
@@ -383,36 +379,16 @@ func TestInstallWebhooks_ConvertibleCRD_ConfiguresConversionEndpoint(t *testing.
 	err = env.Client().Get(ctx, client.ObjectKey{Name: crd.Name}, updatedCRD)
 	g.Expect(err).NotTo(HaveOccurred())
 
-	unstructuredCRD, err := resources.ToUnstructured(updatedCRD)
-	g.Expect(err).NotTo(HaveOccurred())
-
-	strategy, err := jq.Query[string](
-		unstructuredCRD,
-		`.spec.conversion.strategy`,
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(strategy).To(Equal("Webhook"))
-
-	url, err := jq.Query[string](
-		unstructuredCRD,
-		`.spec.conversion.webhook.clientConfig.url`,
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(url).To(ContainSubstring("https://host.testcontainers.internal:9443/convert"))
-
-	caBundle, err := jq.Query[string](
-		unstructuredCRD,
-		`.spec.conversion.webhook.clientConfig.caBundle`,
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(caBundle).NotTo(BeEmpty())
-
-	versions, err := jq.QuerySlice[string](
-		unstructuredCRD,
-		`.spec.conversion.webhook.conversionReviewVersions`,
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(versions).To(ContainElement("v1"))
+	g.Expect(updatedCRD.Spec.Conversion).To(PointTo(MatchFields(IgnoreExtras, Fields{
+		"Strategy": Equal(apiextensionsv1.WebhookConverter),
+		"Webhook": PointTo(MatchFields(IgnoreExtras, Fields{
+			"ClientConfig": PointTo(MatchFields(IgnoreExtras, Fields{
+				"URL":      PointTo(ContainSubstring("https://host.testcontainers.internal:9443/convert")),
+				"CABundle": Not(BeEmpty()),
+			})),
+			"ConversionReviewVersions": ContainElement("v1"),
+		})),
+	})))
 }
 
 func TestInstallWebhooks_NonConvertibleCRD_SkipsConversion(t *testing.T) {
@@ -444,15 +420,12 @@ func TestInstallWebhooks_NonConvertibleCRD_SkipsConversion(t *testing.T) {
 	err = env.Client().Get(ctx, client.ObjectKey{Name: crd.Name}, updatedCRD)
 	g.Expect(err).NotTo(HaveOccurred())
 
-	unstructuredCRD, err := resources.ToUnstructured(updatedCRD)
-	g.Expect(err).NotTo(HaveOccurred())
-
-	strategy, err := jq.Query[string](
-		unstructuredCRD,
-		`.spec.conversion.strategy`,
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(strategy).To(Or(BeEmpty(), Equal("None")))
+	g.Expect(updatedCRD.Spec.Conversion).To(Or(
+		BeNil(),
+		PointTo(MatchFields(IgnoreExtras, Fields{
+			"Strategy": Equal(apiextensionsv1.NoneConverter),
+		})),
+	))
 }
 
 func TestInstallWebhooks_ValidatingWebhook_ConfiguresURLAndCA(t *testing.T) {
@@ -527,15 +500,8 @@ func TestInstallWebhooks_WebhookWithDefaultPath_UsesSlash(t *testing.T) {
 	err = env.Client().Get(ctx, client.ObjectKey{Name: webhook.Name}, installedWebhook)
 	g.Expect(err).NotTo(HaveOccurred())
 
-	unstructuredWebhook, err := resources.ToUnstructured(installedWebhook)
-	g.Expect(err).NotTo(HaveOccurred())
-
-	url, err := jq.Query[string](
-		unstructuredWebhook,
-		`.webhooks[0].clientConfig.url`,
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(url).To(Equal("https://host.testcontainers.internal:9443/"))
+	g.Expect(installedWebhook.Webhooks).To(HaveLen(1))
+	g.Expect(installedWebhook.Webhooks[0].ClientConfig.URL).To(PointTo(Equal("https://host.testcontainers.internal:9443/")))
 }
 
 func TestInstallWebhooks_MultipleWebhooks_ConfiguresAll(t *testing.T) {
@@ -624,28 +590,12 @@ func TestInstallWebhooks_MultipleWebhooks_ConfiguresAll(t *testing.T) {
 	err = env.Client().Get(ctx, client.ObjectKey{Name: webhook.Name}, installedWebhook)
 	g.Expect(err).NotTo(HaveOccurred())
 
-	unstructuredWebhook, err := resources.ToUnstructured(installedWebhook)
-	g.Expect(err).NotTo(HaveOccurred())
-
-	urls, err := jq.QuerySlice[string](
-		unstructuredWebhook,
-		`[.webhooks[].clientConfig.url]`,
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(urls).To(HaveLen(2))
-	g.Expect(urls[0]).To(Equal("https://host.testcontainers.internal:9443/validate1"))
-	g.Expect(urls[1]).To(Equal("https://host.testcontainers.internal:9443/validate2"))
-
-	caBundles, err := jq.QuerySlice[string](
-		unstructuredWebhook,
-		`[.webhooks[].clientConfig.caBundle]`,
-	)
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(caBundles).To(And(
-		HaveLen(2),
-		HaveEach(Not(BeEmpty())),
-	))
-	g.Expect(caBundles[0]).To(Equal(caBundles[1]))
+	g.Expect(installedWebhook.Webhooks).To(HaveLen(2))
+	g.Expect(installedWebhook.Webhooks[0].ClientConfig.URL).To(PointTo(Equal("https://host.testcontainers.internal:9443/validate1")))
+	g.Expect(installedWebhook.Webhooks[1].ClientConfig.URL).To(PointTo(Equal("https://host.testcontainers.internal:9443/validate2")))
+	g.Expect(installedWebhook.Webhooks[0].ClientConfig.CABundle).NotTo(BeEmpty())
+	g.Expect(installedWebhook.Webhooks[1].ClientConfig.CABundle).NotTo(BeEmpty())
+	g.Expect(installedWebhook.Webhooks[0].ClientConfig.CABundle).To(Equal(installedWebhook.Webhooks[1].ClientConfig.CABundle))
 }
 
 // Validation Tests

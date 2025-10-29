@@ -234,8 +234,7 @@ func TestCall_Timeout(t *testing.T) {
 	defer server.Close()
 
 	client, err := webhook.NewClient(server.Listener.Addr().(*net.TCPAddr).IP.String(),
-		server.Listener.Addr().(*net.TCPAddr).Port,
-		webhook.WithClientTimeout(50*time.Millisecond))
+		server.Listener.Addr().(*net.TCPAddr).Port)
 	g.Expect(err).NotTo(HaveOccurred())
 
 	review := admissionv1.AdmissionReview{
@@ -244,7 +243,8 @@ func TestCall_Timeout(t *testing.T) {
 		},
 	}
 
-	resp, err := client.Call(context.Background(), "/validate", review)
+	resp, err := client.Call(context.Background(), "/validate", review,
+		webhook.WithCallTimeout(50*time.Millisecond))
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(resp).To(BeNil())
 }

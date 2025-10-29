@@ -1,40 +1,39 @@
 package resources
 
 import (
+	"context"
 	"fmt"
+	"time"
 
-	"github.com/lburgazzoli/k3s-envtest/internal/jq"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // FilterConvertibleCRDs filters a list of CRDs to only include those that support
 // conversion between versions according to the provided scheme.
 func FilterConvertibleCRDs(
 	scheme *runtime.Scheme,
-	crds []unstructured.Unstructured,
-) ([]unstructured.Unstructured, error) {
+	crds []apiextensionsv1.CustomResourceDefinition,
+) ([]apiextensionsv1.CustomResourceDefinition, error) {
 	convertibles, err := AllConvertibleTypes(scheme)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine convertible types: %w", err)
 	}
 
-	var convertibleCRDs []unstructured.Unstructured
+	var convertibleCRDs []apiextensionsv1.CustomResourceDefinition
 	for _, crd := range crds {
-		group, err := jq.Query[string](&crd, `.spec.group`)
-		if err != nil {
-			return nil, fmt.Errorf("failed to extract group from CRD %s: %w", crd.GetName(), err)
-		}
+		group := crd.Spec.Group
 		if group == "" {
 			return nil, fmt.Errorf("CRD %s missing required field: spec.group", crd.GetName())
 		}
 
-		kind, err := jq.Query[string](&crd, `.spec.names.kind`)
-		if err != nil {
-			return nil, fmt.Errorf("failed to extract kind from CRD %s: %w", crd.GetName(), err)
-		}
+		kind := crd.Spec.Names.Kind
 		if kind == "" {
 			return nil, fmt.Errorf("CRD %s missing required field: spec.names.kind", crd.GetName())
 		}
@@ -45,4 +44,43 @@ func FilterConvertibleCRDs(
 	}
 
 	return convertibleCRDs, nil
+}
+
+// IsCRDEstablished checks if a CRD has the Established condition set to true.
+func IsCRDEstablished(crd *apiextensionsv1.CustomResourceDefinition) bool {
+	for _, condition := range crd.Status.Conditions {
+		if condition.Type == apiextensionsv1.Established && condition.Status == apiextensionsv1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+// WaitForCRDEstablished polls until a CRD becomes established or the timeout is reached.
+func WaitForCRDEstablished(
+	ctx context.Context,
+	cli client.Client,
+	crdName string,
+	pollInterval time.Duration,
+	timeout time.Duration,
+) error {
+	err := wait.PollUntilContextTimeout(ctx, pollInterval, timeout, true, func(ctx context.Context) (bool, error) {
+		crd := apiextensionsv1.CustomResourceDefinition{}
+
+		err := cli.Get(ctx, types.NamespacedName{Name: crdName}, &crd)
+		switch {
+		case k8serr.IsNotFound(err):
+			return false, nil
+		case err != nil:
+			return false, fmt.Errorf("failed to get CRD: %w", err)
+		default:
+			return IsCRDEstablished(&crd), nil
+		}
+	})
+
+	if err != nil {
+		return fmt.Errorf("CRD %s not established: %w", crdName, err)
+	}
+
+	return nil
 }

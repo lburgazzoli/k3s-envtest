@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,23 +13,17 @@ import (
 
 	"github.com/lburgazzoli/k3s-envtest/internal/cert"
 	"github.com/lburgazzoli/k3s-envtest/internal/gvk"
-	"github.com/lburgazzoli/k3s-envtest/internal/jq"
 	"github.com/lburgazzoli/k3s-envtest/internal/resources"
 	"github.com/lburgazzoli/k3s-envtest/internal/resources/filter"
-	"github.com/lburgazzoli/k3s-envtest/internal/webhook"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/k3s"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlwebhook "sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	admissionv1 "k8s.io/api/admission/v1"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	k8serr "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/utils/ptr"
@@ -78,6 +71,13 @@ type CertificatePaths struct {
 	TLSKey  string // Full path to TLS key (key-tls.pem)
 }
 
+// Manifests contains typed Kubernetes resources loaded from manifest files.
+type Manifests struct {
+	CustomResourceDefinitions       []apiextensionsv1.CustomResourceDefinition
+	MutatingWebhookConfigurations   []admissionregistrationv1.MutatingWebhookConfiguration
+	ValidatingWebhookConfigurations []admissionregistrationv1.ValidatingWebhookConfiguration
+}
+
 // loggerConsumer forwards testcontainer logs to the k3senv Logger.
 type loggerConsumer struct {
 	logger Logger
@@ -100,7 +100,7 @@ type K3sEnv struct {
 	options Options
 
 	certData      *cert.Data
-	manifests     []unstructured.Unstructured
+	manifests     Manifests
 	teardownTasks []TeardownTask
 }
 
@@ -197,7 +197,8 @@ func (e *K3sEnv) Start(ctx context.Context) error {
 	if err := e.prepareManifests(); err != nil {
 		return err
 	}
-	e.debugf("Loaded %d manifests", len(e.manifests))
+	totalManifests := len(e.manifests.CustomResourceDefinitions) + len(e.manifests.MutatingWebhookConfigurations) + len(e.manifests.ValidatingWebhookConfigurations)
+	e.debugf("Loaded %d manifests", totalManifests)
 
 	if err := e.installCRDs(ctx); err != nil {
 		return err
@@ -294,23 +295,26 @@ func (e *K3sEnv) GetKubeconfig(ctx context.Context) ([]byte, error) {
 	return kc, nil
 }
 
-func (e *K3sEnv) CRDs() []unstructured.Unstructured {
-	var result []unstructured.Unstructured
-	for _, manifest := range e.manifests {
-		if manifest.GroupVersionKind() == gvk.CustomResourceDefinition {
-			result = append(result, *manifest.DeepCopy())
-		}
+func (e *K3sEnv) CustomResourceDefinitions() []apiextensionsv1.CustomResourceDefinition {
+	result := make([]apiextensionsv1.CustomResourceDefinition, len(e.manifests.CustomResourceDefinitions))
+	for i := range e.manifests.CustomResourceDefinitions {
+		result[i] = *e.manifests.CustomResourceDefinitions[i].DeepCopy()
 	}
 	return result
 }
 
-func (e *K3sEnv) WebhookConfigs() []unstructured.Unstructured {
-	var result []unstructured.Unstructured
-	for _, manifest := range e.manifests {
-		gvkType := manifest.GroupVersionKind()
-		if gvkType == gvk.MutatingWebhookConfiguration || gvkType == gvk.ValidatingWebhookConfiguration {
-			result = append(result, *manifest.DeepCopy())
-		}
+func (e *K3sEnv) MutatingWebhookConfigurations() []admissionregistrationv1.MutatingWebhookConfiguration {
+	result := make([]admissionregistrationv1.MutatingWebhookConfiguration, len(e.manifests.MutatingWebhookConfigurations))
+	for i := range e.manifests.MutatingWebhookConfigurations {
+		result[i] = *e.manifests.MutatingWebhookConfigurations[i].DeepCopy()
+	}
+	return result
+}
+
+func (e *K3sEnv) ValidatingWebhookConfigurations() []admissionregistrationv1.ValidatingWebhookConfiguration {
+	result := make([]admissionregistrationv1.ValidatingWebhookConfiguration, len(e.manifests.ValidatingWebhookConfigurations))
+	for i := range e.manifests.ValidatingWebhookConfigurations {
+		result[i] = *e.manifests.ValidatingWebhookConfigurations[i].DeepCopy()
 	}
 	return result
 }
@@ -339,57 +343,55 @@ func (e *K3sEnv) InstallWebhooks(ctx context.Context) error {
 
 	e.debugf("Installing webhooks with host: %s", webhookHostPort)
 
-	webhookConfigs, err := e.patchWebhookConfigurations(webhookHostPort)
-	if err != nil {
-		return fmt.Errorf("failed to patch webhook configurations: %w", err)
+	if err := e.installWebhooks(ctx, webhookHostPort); err != nil {
+		return fmt.Errorf("failed to install webhook configurations: %w", err)
 	}
 
-	for i := range webhookConfigs {
-		wh := &webhookConfigs[i]
-		if err := e.cli.Create(ctx, wh); err != nil {
-			return fmt.Errorf("failed to create webhook config %s: %w", wh.GetName(), err)
-		}
-
-		if !ptr.Deref(e.options.Webhook.CheckReadiness, false) {
-			continue
-		}
-
-		if err := e.waitForWebhookEndpointsReady(ctx, wh, e.options.Webhook.Port); err != nil {
-			return fmt.Errorf("webhook config %s endpoints not ready: %w", wh.GetName(), err)
-		}
-	}
-
-	crds := e.CRDs()
-	convertibleCRDs, err := resources.FilterConvertibleCRDs(e.options.Scheme, crds)
+	crds, err := resources.FilterConvertibleCRDs(e.options.Scheme, e.CustomResourceDefinitions())
 	if err != nil {
 		return fmt.Errorf("failed to determine convertible CRDs: %w", err)
 	}
 
-	if len(convertibleCRDs) > 0 {
-		if err := e.patchAndUpdateCRDConversions(ctx, convertibleCRDs, webhookHostPort); err != nil {
+	if len(crds) > 0 {
+		if err := e.patchAndUpdateCRDConversions(ctx, crds, webhookHostPort); err != nil {
 			return fmt.Errorf("failed to patch and update CRD conversions: %w", err)
-		}
-
-		if err := e.waitForCRDsEstablished(ctx, extractNames(convertibleCRDs)); err != nil {
-			return fmt.Errorf("failed waiting for converted CRDs to be re-established: %w", err)
 		}
 	}
 
 	return nil
 }
 
-func (e *K3sEnv) CreateCRD(
+func (e *K3sEnv) InstallCRD(
 	ctx context.Context,
-	crd client.Object,
+	crd *apiextensionsv1.CustomResourceDefinition,
 ) error {
-	if err := e.cli.Create(ctx, crd); err != nil && !k8serr.IsAlreadyExists(err) {
-		return fmt.Errorf("failed to create CRD %s: %w",
-			resources.FormatObjectReference(crd),
-			err,
-		)
+	e.debugf("Installing CRD %s", crd.GetName())
+
+	if err := resources.EnsureGroupVersionKind(e.options.Scheme, crd); err != nil {
+		return fmt.Errorf("failed to set GVK for CRD %s: %w", crd.GetName(), err)
 	}
 
-	return e.waitForCRDsEstablished(ctx, []string{crd.GetName()})
+	err := e.cli.Patch(ctx, crd, client.Apply, client.ForceOwnership, client.FieldOwner("k3s-envtest"))
+	if err != nil {
+		return fmt.Errorf("failed to apply CRD %s: %w", crd.GetName(), err)
+	}
+
+	e.debugf("Waiting for CRD %s to be established...", crd.GetName())
+
+	err = resources.WaitForCRDEstablished(
+		ctx,
+		e.cli,
+		crd.GetName(),
+		e.options.CRD.PollInterval,
+		e.options.CRD.ReadyTimeout,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to wait for CRD to be established: %w", err)
+	}
+
+	e.debugf("CRD %s is now active", crd.GetName())
+
+	return nil
 }
 
 func (e *K3sEnv) startK3sContainer(ctx context.Context) error {
@@ -447,10 +449,14 @@ func (e *K3sEnv) createKubernetesClients() error {
 }
 
 func (e *K3sEnv) setupCertificates() error {
-	autoGeneratedCertDir := false
 	if e.options.Certificate.Path == "" {
-		e.options.Certificate.Path = fmt.Sprintf("%s%s", DefaultCertDirPrefix, e.container.GetContainerID())
-		autoGeneratedCertDir = true
+		cd := fmt.Sprintf("%s%s", DefaultCertDirPrefix, e.container.GetContainerID())
+
+		e.AddTeardown(func(ctx context.Context) error {
+			return os.RemoveAll(cd)
+		})
+
+		e.options.Certificate.Path = cd
 	}
 
 	certData, err := cert.New(e.options.Certificate.Path, e.options.Certificate.Validity, CertificateSANs)
@@ -460,18 +466,11 @@ func (e *K3sEnv) setupCertificates() error {
 
 	e.certData = certData
 
-	if autoGeneratedCertDir {
-		certDirToClean := e.options.Certificate.Path
-		e.AddTeardown(func(ctx context.Context) error {
-			return os.RemoveAll(certDirToClean)
-		})
-	}
-
 	return nil
 }
 
 func (e *K3sEnv) prepareManifests() error {
-	e.manifests = []unstructured.Unstructured{}
+	e.manifests = Manifests{}
 
 	// Define the filter for CRDs and webhook configurations
 	manifestFilter := filter.ByType(
@@ -479,6 +478,8 @@ func (e *K3sEnv) prepareManifests() error {
 		gvk.MutatingWebhookConfiguration,
 		gvk.ValidatingWebhookConfiguration,
 	)
+
+	var unstructuredObjs []runtime.Object
 
 	if len(e.options.Manifest.Paths) > 0 {
 		manifests, err := resources.LoadFromPaths(
@@ -488,7 +489,9 @@ func (e *K3sEnv) prepareManifests() error {
 		if err != nil {
 			return fmt.Errorf("failed to load manifests from paths %v: %w", e.options.Manifest.Paths, err)
 		}
-		e.manifests = append(e.manifests, manifests...)
+		for _, m := range manifests {
+			unstructuredObjs = append(unstructuredObjs, &m)
+		}
 	}
 
 	if len(e.options.Manifest.Objects) > 0 {
@@ -500,181 +503,42 @@ func (e *K3sEnv) prepareManifests() error {
 		if err != nil {
 			return fmt.Errorf("failed to load %d runtime objects: %w", len(e.options.Manifest.Objects), err)
 		}
-		e.manifests = append(e.manifests, manifests...)
-	}
-
-	return nil
-}
-
-func (e *K3sEnv) patchAndUpdateCRDConversions(
-	ctx context.Context,
-	convertibleCRDs []unstructured.Unstructured,
-	hostPort string,
-) error {
-	baseURL := fmt.Sprintf("%s://%s", WebhookURLScheme, hostPort)
-	caBundle := string(e.certData.CABundle())
-
-	for i := range convertibleCRDs {
-		crd := convertibleCRDs[i].DeepCopy()
-
-		if err := e.cli.Get(ctx, client.ObjectKeyFromObject(crd), crd); err != nil {
-			return fmt.Errorf("failed to get CRD %s: %w", crd.GetName(), err)
-		}
-
-		if err := resources.PatchCRDConversion(crd, baseURL, caBundle); err != nil {
-			return fmt.Errorf("failed to patch CRD %s: %w", crd.GetName(), err)
-		}
-
-		if err := e.cli.Update(ctx, crd); err != nil {
-			return fmt.Errorf("failed to update CRD %s with conversion: %w", crd.GetName(), err)
+		for _, m := range manifests {
+			unstructuredObjs = append(unstructuredObjs, &m)
 		}
 	}
 
-	return nil
-}
-
-func (e *K3sEnv) installCRDs(ctx context.Context) error {
-	crds := e.CRDs()
-	if len(crds) == 0 {
-		return nil
-	}
-
-	for i := range crds {
-		err := e.cli.Create(ctx, &crds[i])
-		if err != nil && !k8serr.IsAlreadyExists(err) {
-			return fmt.Errorf("failed to create CRD %s: %w",
-				resources.FormatObjectReference(&crds[i]),
-				err,
-			)
+	// Convert unstructured objects to typed objects
+	for _, obj := range unstructuredObjs {
+		uns, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			continue
 		}
-	}
 
-	if err := e.waitForCRDsEstablished(ctx, extractNames(crds)); err != nil {
-		return fmt.Errorf("failed waiting for CRDs to be established: %w", err)
-	}
+		objGVK := uns.GroupVersionKind()
 
-	return nil
-}
-
-func (e *K3sEnv) waitForCRDsEstablished(
-	ctx context.Context,
-	crdNames []string,
-) error {
-	e.debugf("Waiting for CRDs to be established...")
-
-	for _, crdName := range crdNames {
-		e.debugf("Checking CRD: %s", crdName)
-
-		err := wait.PollUntilContextTimeout(ctx, e.options.CRD.PollInterval, e.options.CRD.ReadyTimeout, true, func(ctx context.Context) (bool, error) {
-			obj := &apiextensionsv1.CustomResourceDefinition{}
-			err := e.cli.Get(ctx, client.ObjectKey{Name: crdName}, obj)
-			switch {
-			case k8serr.IsNotFound(err):
-				return false, nil
-			case err != nil:
-				return false, fmt.Errorf("failed to get CRD %s: %w", crdName, err)
+		switch objGVK {
+		case gvk.CustomResourceDefinition:
+			var crd apiextensionsv1.CustomResourceDefinition
+			if err := resources.Convert(e.options.Scheme, uns, &crd); err != nil {
+				return fmt.Errorf("failed to convert CRD %s: %w", uns.GetName(), err)
 			}
+			e.manifests.CustomResourceDefinitions = append(e.manifests.CustomResourceDefinitions, crd)
 
-			for _, condition := range obj.Status.Conditions {
-				if condition.Type == apiextensionsv1.Established && condition.Status == apiextensionsv1.ConditionTrue {
-					e.debugf("CRD %s is now active", crdName)
-					return true, nil
-				}
+		case gvk.MutatingWebhookConfiguration:
+			var webhook admissionregistrationv1.MutatingWebhookConfiguration
+			if err := resources.Convert(e.options.Scheme, uns, &webhook); err != nil {
+				return fmt.Errorf("failed to convert MutatingWebhookConfiguration %s: %w", uns.GetName(), err)
 			}
+			e.manifests.MutatingWebhookConfigurations = append(e.manifests.MutatingWebhookConfigurations, webhook)
 
-			return false, nil
-		})
-
-		if err != nil {
-			return fmt.Errorf("CRD %s not established: %w", crdName, err)
+		case gvk.ValidatingWebhookConfiguration:
+			var webhook admissionregistrationv1.ValidatingWebhookConfiguration
+			if err := resources.Convert(e.options.Scheme, uns, &webhook); err != nil {
+				return fmt.Errorf("failed to convert ValidatingWebhookConfiguration %s: %w", uns.GetName(), err)
+			}
+			e.manifests.ValidatingWebhookConfigurations = append(e.manifests.ValidatingWebhookConfigurations, webhook)
 		}
-	}
-
-	return nil
-}
-
-func (e *K3sEnv) patchWebhookConfigurations(
-	hostPort string,
-) ([]unstructured.Unstructured, error) {
-	baseURL := fmt.Sprintf("%s://%s", WebhookURLScheme, hostPort)
-	caBundle := string(e.certData.CABundle())
-
-	webhookConfigs := e.WebhookConfigs()
-	for i := range webhookConfigs {
-		if err := resources.PatchWebhookConfiguration(&webhookConfigs[i], baseURL, caBundle); err != nil {
-			return nil, fmt.Errorf("failed to patch webhook %s: %w", webhookConfigs[i].GetName(), err)
-		}
-	}
-
-	return webhookConfigs, nil
-}
-
-func (e *K3sEnv) waitForWebhookEndpointsReady(
-	ctx context.Context,
-	webhookConfig *unstructured.Unstructured,
-	port int,
-) error {
-	// Extract webhook endpoint URLs from the configuration using JQ
-	webhookURLs, err := jq.QuerySlice[string](webhookConfig, `[.webhooks[].clientConfig.url]`)
-	if err != nil {
-		return fmt.Errorf("failed to extract webhook URLs: %w", err)
-	}
-
-	if len(webhookURLs) == 0 {
-		e.debugf("No webhook endpoints found in config %s, skipping health check", webhookConfig.GetName())
-		return nil
-	}
-
-	e.debugf("Checking %d webhook endpoints for %s...", len(webhookURLs), webhookConfig.GetName())
-
-	// Create webhook client once for all endpoint checks
-	webhookClient, err := webhook.NewClient(
-		"127.0.0.1",
-		port,
-		webhook.WithClientCACert(e.certData.CACert),
-		webhook.WithClientTimeout(e.options.Webhook.HealthCheckTimeout),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create webhook client: %w", err)
-	}
-
-	// Minimal AdmissionReview for health check
-	healthCheckReview := admissionv1.AdmissionReview{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: gvk.AdmissionReview.GroupVersion().String(),
-			Kind:       gvk.AdmissionReview.Kind,
-		},
-		Request: &admissionv1.AdmissionRequest{
-			UID:       types.UID("00000000-0000-0000-0000-000000000000"),
-			Operation: admissionv1.Create,
-			Object:    runtime.RawExtension{Raw: []byte("{}")},
-		},
-	}
-
-	// Check each webhook endpoint
-	for _, webhookURL := range webhookURLs {
-		parsedURL, err := url.Parse(webhookURL)
-		if err != nil {
-			return fmt.Errorf("invalid webhook URL %s: %w", webhookURL, err)
-		}
-
-		endpointPath := parsedURL.Path
-		if endpointPath == "" {
-			endpointPath = "/"
-		}
-
-		e.debugf("Checking webhook endpoint: %s (local path: %s)", webhookURL, endpointPath)
-
-		err = wait.PollUntilContextTimeout(ctx, e.options.Webhook.PollInterval, e.options.Webhook.ReadyTimeout, true, func(ctx context.Context) (bool, error) {
-			_, err := webhookClient.Call(ctx, endpointPath, healthCheckReview)
-			return err == nil, nil
-		})
-
-		if err != nil {
-			return fmt.Errorf("webhook endpoint %s not ready: %w", endpointPath, err)
-		}
-
-		e.debugf("Webhook endpoint %s is ready", endpointPath)
 	}
 
 	return nil

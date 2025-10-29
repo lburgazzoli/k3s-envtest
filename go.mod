@@ -3,7 +3,6 @@ module github.com/lburgazzoli/k3s-envtest
 go 1.24.8
 
 require (
-	github.com/itchyny/gojq v0.12.17
 	github.com/mdelapenya/tlscert v0.2.0
 	github.com/onsi/gomega v1.38.2
 	github.com/spf13/viper v1.21.0
@@ -16,7 +15,6 @@ require (
 	k8s.io/client-go v0.32.4
 	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738
 	sigs.k8s.io/controller-runtime v0.20.4
-	sigs.k8s.io/yaml v1.6.0
 )
 
 require (
@@ -56,7 +54,6 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/itchyny/timefmt-go v0.1.7 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
@@ -121,4 +118,5 @@ require (
 	k8s.io/kube-openapi v0.0.0-20241105132330-32ad38e42d3f // indirect
 	sigs.k8s.io/json v0.0.0-20241010143419-9aa6b5e7a4b3 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.2 // indirect
+	sigs.k8s.io/yaml v1.6.0 // indirect
 )

@@ -1,70 +1,84 @@
 package resources
 
 import (
-	"fmt"
+	"net/url"
 
-	"github.com/lburgazzoli/k3s-envtest/internal/jq"
-
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/utils/ptr"
 )
 
-// PatchWebhookConfiguration patches a webhook configuration (validating or mutating)
+// PatchMutatingWebhookConfiguration patches a mutating webhook configuration
 // to use the provided base URL and CA bundle. It modifies the webhook in-place.
 //
 // For each webhook in the configuration:
-// - Sets clientConfig.url to baseURL + path (from clientConfig.service.path, defaults to "/")
+// - Sets clientConfig.url to baseURL + path (defaults to "/")
 // - Sets clientConfig.caBundle to the provided CA bundle
 // - Removes clientConfig.service field.
-func PatchWebhookConfiguration(
-	webhook *unstructured.Unstructured,
+func PatchMutatingWebhookConfiguration(
+	webhook *admissionregistrationv1.MutatingWebhookConfiguration,
 	baseURL string,
 	caBundle string,
-) error {
-	err := jq.Transform(webhook, `
-		.webhooks |= map(
-			.clientConfig.url = "%s" + (.clientConfig.service.path // "/") |
-			.clientConfig.caBundle = "%s" |
-			del(.clientConfig.service)
-		)
-	`, baseURL, caBundle)
-
-	if err != nil {
-		return fmt.Errorf("failed to patch webhook configuration: %w", err)
-	}
-
-	return nil
-}
-
-// PatchCRDConversion patches a CustomResourceDefinition to use webhook-based conversion
-// with the provided base URL and CA bundle. It modifies the CRD in-place.
-//
-// Sets:
-// - .spec.conversion.strategy = "Webhook"
-// - .spec.conversion.webhook.conversionReviewVersions = ["v1", "v1beta1"]
-// - .spec.conversion.webhook.clientConfig.url = baseURL + "/convert"
-// - .spec.conversion.webhook.clientConfig.caBundle = caBundle.
-func PatchCRDConversion(
-	crd *unstructured.Unstructured,
-	baseURL string,
-	caBundle string,
-) error {
-	err := jq.Transform(
-		crd, `
-		.spec.conversion = {
-			"strategy": "Webhook",
-			"webhook": {
-				"conversionReviewVersions": ["v1", "v1beta1"],
-				"clientConfig": {
-					"url": "%s",
-					"caBundle": "%s"
-				}
+) {
+	for i := range webhook.Webhooks {
+		path := "/"
+		if webhook.Webhooks[i].ClientConfig.Service != nil && webhook.Webhooks[i].ClientConfig.Service.Path != nil {
+			path = *webhook.Webhooks[i].ClientConfig.Service.Path
+		} else if webhook.Webhooks[i].ClientConfig.URL != nil {
+			if parsedURL, err := url.Parse(*webhook.Webhooks[i].ClientConfig.URL); err == nil {
+				path = parsedURL.Path
 			}
 		}
-	`, baseURL+"/convert", caBundle)
 
-	if err != nil {
-		return fmt.Errorf("failed to patch CRD conversion: %w", err)
+		webhook.Webhooks[i].ClientConfig.URL = ptr.To(baseURL + path)
+		webhook.Webhooks[i].ClientConfig.CABundle = []byte(caBundle)
+		webhook.Webhooks[i].ClientConfig.Service = nil
 	}
+}
 
-	return nil
+// PatchValidatingWebhookConfiguration patches a validating webhook configuration
+// to use the provided base URL and CA bundle. It modifies the webhook in-place.
+//
+// For each webhook in the configuration:
+// - Sets clientConfig.url to baseURL + path (defaults to "/")
+// - Sets clientConfig.caBundle to the provided CA bundle
+// - Removes clientConfig.service field.
+func PatchValidatingWebhookConfiguration(
+	webhook *admissionregistrationv1.ValidatingWebhookConfiguration,
+	baseURL string,
+	caBundle string,
+) {
+	for i := range webhook.Webhooks {
+		path := "/"
+		if webhook.Webhooks[i].ClientConfig.Service != nil && webhook.Webhooks[i].ClientConfig.Service.Path != nil {
+			path = *webhook.Webhooks[i].ClientConfig.Service.Path
+		} else if webhook.Webhooks[i].ClientConfig.URL != nil {
+			if parsedURL, err := url.Parse(*webhook.Webhooks[i].ClientConfig.URL); err == nil {
+				path = parsedURL.Path
+			}
+		}
+
+		webhook.Webhooks[i].ClientConfig.URL = ptr.To(baseURL + path)
+		webhook.Webhooks[i].ClientConfig.CABundle = []byte(caBundle)
+		webhook.Webhooks[i].ClientConfig.Service = nil
+	}
+}
+
+// PatchCRDConversion patches a CustomResourceDefinition to use webhook-based conversion.
+// It modifies the CRD in-place.
+func PatchCRDConversion(
+	crd *apiextensionsv1.CustomResourceDefinition,
+	baseURL string,
+	caBundle []byte,
+) {
+	crd.Spec.Conversion = &apiextensionsv1.CustomResourceConversion{
+		Strategy: apiextensionsv1.WebhookConverter,
+		Webhook: &apiextensionsv1.WebhookConversion{
+			ConversionReviewVersions: []string{"v1", "v1beta1"},
+			ClientConfig: &apiextensionsv1.WebhookClientConfig{
+				URL:      ptr.To(baseURL + "/convert"),
+				CABundle: caBundle,
+			},
+		},
+	}
 }

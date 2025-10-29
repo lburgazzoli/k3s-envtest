@@ -7,281 +7,183 @@ import (
 
 	"github.com/lburgazzoli/k3s-envtest/internal/resources"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	. "github.com/onsi/gomega"
 )
 
 const (
-	testBaseURL  = "https://example.com:9443"
-	testCABundle = "test-ca-bundle-data"
+	testBaseURL     = "https://example.com:9443"
+	testCABundleStr = "test-ca-bundle-data"
 )
+
+var testCABundleBytes = []byte("test-ca-bundle-data")
 
 func TestPatchWebhookConfiguration_Validating(t *testing.T) {
 	g := NewWithT(t)
 
-	webhook := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "admissionregistration.k8s.io/v1",
-			"kind":       "ValidatingWebhookConfiguration",
-			"metadata": map[string]interface{}{
-				"name": "test-validating-webhook",
-			},
-			"webhooks": []interface{}{
-				map[string]interface{}{
-					"name": "validate.example.com",
-					"clientConfig": map[string]interface{}{
-						"service": map[string]interface{}{
-							"namespace": "default",
-							"name":      "webhook-service",
-							"path":      "/validate",
-						},
+	webhook := &admissionregistrationv1.ValidatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-validating-webhook",
+		},
+		Webhooks: []admissionregistrationv1.ValidatingWebhook{
+			{
+				Name: "validate.example.com",
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					Service: &admissionregistrationv1.ServiceReference{
+						Namespace: "default",
+						Name:      "webhook-service",
+						Path:      ptr.To("/validate"),
 					},
 				},
 			},
 		},
 	}
 
-	err := resources.PatchWebhookConfiguration(webhook, testBaseURL, testCABundle)
-	g.Expect(err).NotTo(HaveOccurred())
+	resources.PatchValidatingWebhookConfiguration(webhook, testBaseURL, testCABundleStr)
 
-	webhooks, found, err := unstructured.NestedSlice(webhook.Object, "webhooks")
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(found).To(BeTrue())
-	g.Expect(webhooks).To(HaveLen(1))
-
-	firstWebhook := webhooks[0].(map[string]interface{})
-	clientConfig := firstWebhook["clientConfig"].(map[string]interface{})
-
-	g.Expect(clientConfig["url"]).To(Equal(testBaseURL + "/validate"))
-	g.Expect(clientConfig["caBundle"]).To(Equal(testCABundle))
-	g.Expect(clientConfig).NotTo(HaveKey("service"))
+	g.Expect(webhook.Webhooks).To(HaveLen(1))
+	g.Expect(webhook.Webhooks[0].ClientConfig.URL).To(Equal(ptr.To(testBaseURL + "/validate")))
+	g.Expect(webhook.Webhooks[0].ClientConfig.CABundle).To(Equal([]byte(testCABundleStr)))
+	g.Expect(webhook.Webhooks[0].ClientConfig.Service).To(BeNil())
 }
 
 func TestPatchWebhookConfiguration_Mutating(t *testing.T) {
 	g := NewWithT(t)
 
-	webhook := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "admissionregistration.k8s.io/v1",
-			"kind":       "MutatingWebhookConfiguration",
-			"metadata": map[string]interface{}{
-				"name": "test-mutating-webhook",
-			},
-			"webhooks": []interface{}{
-				map[string]interface{}{
-					"name": "mutate.example.com",
-					"clientConfig": map[string]interface{}{
-						"service": map[string]interface{}{
-							"namespace": "default",
-							"name":      "webhook-service",
-							"path":      "/mutate",
-						},
+	webhook := &admissionregistrationv1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-mutating-webhook",
+		},
+		Webhooks: []admissionregistrationv1.MutatingWebhook{
+			{
+				Name: "mutate.example.com",
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					Service: &admissionregistrationv1.ServiceReference{
+						Namespace: "default",
+						Name:      "webhook-service",
+						Path:      ptr.To("/mutate"),
 					},
 				},
 			},
 		},
 	}
 
-	err := resources.PatchWebhookConfiguration(webhook, testBaseURL, testCABundle)
-	g.Expect(err).NotTo(HaveOccurred())
+	resources.PatchMutatingWebhookConfiguration(webhook, testBaseURL, testCABundleStr)
 
-	webhooks, found, err := unstructured.NestedSlice(webhook.Object, "webhooks")
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(found).To(BeTrue())
-	g.Expect(webhooks).To(HaveLen(1))
-
-	firstWebhook := webhooks[0].(map[string]interface{})
-	clientConfig := firstWebhook["clientConfig"].(map[string]interface{})
-
-	g.Expect(clientConfig["url"]).To(Equal(testBaseURL + "/mutate"))
-	g.Expect(clientConfig["caBundle"]).To(Equal(testCABundle))
-	g.Expect(clientConfig).NotTo(HaveKey("service"))
+	g.Expect(webhook.Webhooks).To(HaveLen(1))
+	g.Expect(webhook.Webhooks[0].ClientConfig.URL).To(Equal(ptr.To(testBaseURL + "/mutate")))
+	g.Expect(webhook.Webhooks[0].ClientConfig.CABundle).To(Equal([]byte(testCABundleStr)))
+	g.Expect(webhook.Webhooks[0].ClientConfig.Service).To(BeNil())
 }
 
 func TestPatchWebhookConfiguration_MultipleWebhooks(t *testing.T) {
 	g := NewWithT(t)
 
-	webhook := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "admissionregistration.k8s.io/v1",
-			"kind":       "ValidatingWebhookConfiguration",
-			"metadata": map[string]interface{}{
-				"name": "test-multiple-webhooks",
-			},
-			"webhooks": []interface{}{
-				map[string]interface{}{
-					"name": "webhook1.example.com",
-					"clientConfig": map[string]interface{}{
-						"service": map[string]interface{}{
-							"namespace": "default",
-							"name":      "webhook-service",
-							"path":      "/validate1",
-						},
+	webhook := &admissionregistrationv1.ValidatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-multiple-webhooks",
+		},
+		Webhooks: []admissionregistrationv1.ValidatingWebhook{
+			{
+				Name: "webhook1.example.com",
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					Service: &admissionregistrationv1.ServiceReference{
+						Namespace: "default",
+						Name:      "webhook-service",
+						Path:      ptr.To("/validate1"),
 					},
 				},
-				map[string]interface{}{
-					"name": "webhook2.example.com",
-					"clientConfig": map[string]interface{}{
-						"service": map[string]interface{}{
-							"namespace": "default",
-							"name":      "webhook-service",
-							"path":      "/validate2",
-						},
+			},
+			{
+				Name: "webhook2.example.com",
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					Service: &admissionregistrationv1.ServiceReference{
+						Namespace: "default",
+						Name:      "webhook-service",
+						Path:      ptr.To("/validate2"),
 					},
 				},
 			},
 		},
 	}
 
-	err := resources.PatchWebhookConfiguration(webhook, testBaseURL, testCABundle)
-	g.Expect(err).NotTo(HaveOccurred())
+	resources.PatchValidatingWebhookConfiguration(webhook, testBaseURL, testCABundleStr)
 
-	webhooks, found, err := unstructured.NestedSlice(webhook.Object, "webhooks")
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(found).To(BeTrue())
-	g.Expect(webhooks).To(HaveLen(2))
-
-	webhook1 := webhooks[0].(map[string]interface{})
-	clientConfig1 := webhook1["clientConfig"].(map[string]interface{})
-	g.Expect(clientConfig1["url"]).To(Equal(testBaseURL + "/validate1"))
-	g.Expect(clientConfig1["caBundle"]).To(Equal(testCABundle))
-
-	webhook2 := webhooks[1].(map[string]interface{})
-	clientConfig2 := webhook2["clientConfig"].(map[string]interface{})
-	g.Expect(clientConfig2["url"]).To(Equal(testBaseURL + "/validate2"))
-	g.Expect(clientConfig2["caBundle"]).To(Equal(testCABundle))
+	g.Expect(webhook.Webhooks).To(HaveLen(2))
+	g.Expect(webhook.Webhooks[0].ClientConfig.URL).To(Equal(ptr.To(testBaseURL + "/validate1")))
+	g.Expect(webhook.Webhooks[0].ClientConfig.CABundle).To(Equal([]byte(testCABundleStr)))
+	g.Expect(webhook.Webhooks[1].ClientConfig.URL).To(Equal(ptr.To(testBaseURL + "/validate2")))
+	g.Expect(webhook.Webhooks[1].ClientConfig.CABundle).To(Equal([]byte(testCABundleStr)))
 }
 
 func TestPatchWebhookConfiguration_DefaultPath(t *testing.T) {
 	g := NewWithT(t)
 
-	webhook := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "admissionregistration.k8s.io/v1",
-			"kind":       "ValidatingWebhookConfiguration",
-			"metadata": map[string]interface{}{
-				"name": "test-default-path",
-			},
-			"webhooks": []interface{}{
-				map[string]interface{}{
-					"name": "validate.example.com",
-					"clientConfig": map[string]interface{}{
-						"service": map[string]interface{}{
-							"namespace": "default",
-							"name":      "webhook-service",
-						},
+	webhook := &admissionregistrationv1.ValidatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-default-path",
+		},
+		Webhooks: []admissionregistrationv1.ValidatingWebhook{
+			{
+				Name: "validate.example.com",
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					Service: &admissionregistrationv1.ServiceReference{
+						Namespace: "default",
+						Name:      "webhook-service",
 					},
 				},
 			},
 		},
 	}
 
-	err := resources.PatchWebhookConfiguration(webhook, testBaseURL, testCABundle)
-	g.Expect(err).NotTo(HaveOccurred())
+	resources.PatchValidatingWebhookConfiguration(webhook, testBaseURL, testCABundleStr)
 
-	webhooks, found, err := unstructured.NestedSlice(webhook.Object, "webhooks")
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(found).To(BeTrue())
-
-	firstWebhook := webhooks[0].(map[string]interface{})
-	clientConfig := firstWebhook["clientConfig"].(map[string]interface{})
-
-	g.Expect(clientConfig["url"]).To(Equal(testBaseURL + "/"))
-}
-
-func TestPatchWebhookConfiguration_InvalidObject(t *testing.T) {
-	g := NewWithT(t)
-
-	webhook := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "admissionregistration.k8s.io/v1",
-			"kind":       "ValidatingWebhookConfiguration",
-			"metadata": map[string]interface{}{
-				"name": "test-invalid",
-			},
-		},
-	}
-
-	err := resources.PatchWebhookConfiguration(webhook, testBaseURL, testCABundle)
-	g.Expect(err).To(HaveOccurred())
-	g.Expect(err.Error()).To(ContainSubstring("failed to patch webhook configuration"))
+	g.Expect(webhook.Webhooks[0].ClientConfig.URL).To(Equal(ptr.To(testBaseURL + "/")))
 }
 
 func TestPatchCRDConversion_Success(t *testing.T) {
 	g := NewWithT(t)
 
-	crd := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "apiextensions.k8s.io/v1",
-			"kind":       "CustomResourceDefinition",
-			"metadata": map[string]interface{}{
-				"name": "examples.test.example.com",
+	crd := &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "examples.test.example.com",
+		},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: "test.example.com",
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Kind:   "Example",
+				Plural: "examples",
 			},
-			"spec": map[string]interface{}{
-				"group": "test.example.com",
-				"names": map[string]interface{}{
-					"kind":   "Example",
-					"plural": "examples",
+			Scope: apiextensionsv1.NamespaceScoped,
+			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1",
+					Served:  true,
+					Storage: true,
 				},
-				"scope": "Namespaced",
-				"versions": []interface{}{
-					map[string]interface{}{
-						"name":    "v1",
-						"served":  true,
-						"storage": true,
-					},
-					map[string]interface{}{
-						"name":    "v1beta1",
-						"served":  true,
-						"storage": false,
-					},
+				{
+					Name:    "v1beta1",
+					Served:  true,
+					Storage: false,
 				},
 			},
 		},
 	}
 
-	err := resources.PatchCRDConversion(crd, testBaseURL, testCABundle)
-	g.Expect(err).NotTo(HaveOccurred())
+	resources.PatchCRDConversion(crd, testBaseURL, testCABundleBytes)
 
-	conversion, found, err := unstructured.NestedMap(crd.Object, "spec", "conversion")
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(found).To(BeTrue())
-
-	g.Expect(conversion["strategy"]).To(Equal("Webhook"))
-
-	webhook, found, err := unstructured.NestedMap(crd.Object, "spec", "conversion", "webhook")
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(found).To(BeTrue())
-
-	reviewVersions, found, err := unstructured.NestedStringSlice(crd.Object, "spec", "conversion", "webhook", "conversionReviewVersions")
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(found).To(BeTrue())
-	g.Expect(reviewVersions).To(Equal([]string{"v1", "v1beta1"}))
-
-	clientConfig := webhook["clientConfig"].(map[string]interface{})
-	g.Expect(clientConfig["url"]).To(Equal(testBaseURL + "/convert"))
-	g.Expect(clientConfig["caBundle"]).To(Equal(testCABundle))
-}
-
-func TestPatchCRDConversion_InvalidObject(t *testing.T) {
-	g := NewWithT(t)
-
-	// Create an object with spec as a non-map type to cause jq transformation to fail
-	crd := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "apiextensions.k8s.io/v1",
-			"kind":       "CustomResourceDefinition",
-			"metadata": map[string]interface{}{
-				"name": "invalid",
-			},
-			"spec": "invalid-not-a-map",
-		},
-	}
-
-	err := resources.PatchCRDConversion(crd, testBaseURL, testCABundle)
-	g.Expect(err).To(HaveOccurred())
-	g.Expect(err.Error()).To(ContainSubstring("failed to patch CRD conversion"))
+	g.Expect(crd.Spec.Conversion).NotTo(BeNil())
+	g.Expect(crd.Spec.Conversion.Strategy).To(Equal(apiextensionsv1.WebhookConverter))
+	g.Expect(crd.Spec.Conversion.Webhook).NotTo(BeNil())
+	g.Expect(crd.Spec.Conversion.Webhook.ConversionReviewVersions).To(Equal([]string{"v1", "v1beta1"}))
+	g.Expect(crd.Spec.Conversion.Webhook.ClientConfig).NotTo(BeNil())
+	g.Expect(crd.Spec.Conversion.Webhook.ClientConfig.URL).NotTo(BeNil())
+	g.Expect(*crd.Spec.Conversion.Webhook.ClientConfig.URL).To(Equal(testBaseURL + "/convert"))
+	g.Expect(crd.Spec.Conversion.Webhook.ClientConfig.CABundle).To(Equal(testCABundleBytes))
 }
 
 func TestPatchWebhookConfiguration_RealWorldExample(t *testing.T) {
@@ -290,53 +192,47 @@ func TestPatchWebhookConfiguration_RealWorldExample(t *testing.T) {
 	caCert := base64.StdEncoding.EncodeToString([]byte("mock-ca-certificate"))
 	baseURL := "https://host.testcontainers.internal:9443"
 
-	webhook := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "admissionregistration.k8s.io/v1",
-			"kind":       "ValidatingWebhookConfiguration",
-			"metadata": map[string]interface{}{
-				"name": "pod-policy-webhook",
-			},
-			"webhooks": []interface{}{
-				map[string]interface{}{
-					"name": "validate.pods.policy.io",
-					"clientConfig": map[string]interface{}{
-						"service": map[string]interface{}{
-							"namespace": "webhook-system",
-							"name":      "webhook-server",
-							"port":      443,
-							"path":      "/validate-v1-pod",
-						},
+	sideEffects := admissionregistrationv1.SideEffectClassNone
+	webhook := &admissionregistrationv1.ValidatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-policy-webhook",
+		},
+		Webhooks: []admissionregistrationv1.ValidatingWebhook{
+			{
+				Name: "validate.pods.policy.io",
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					Service: &admissionregistrationv1.ServiceReference{
+						Namespace: "webhook-system",
+						Name:      "webhook-server",
+						Port:      ptr.To(int32(443)),
+						Path:      ptr.To("/validate-v1-pod"),
 					},
-					"rules": []interface{}{
-						map[string]interface{}{
-							"apiGroups":   []interface{}{""},
-							"apiVersions": []interface{}{"v1"},
-							"operations":  []interface{}{"CREATE", "UPDATE"},
-							"resources":   []interface{}{"pods"},
-						},
-					},
-					"admissionReviewVersions": []interface{}{"v1"},
-					"sideEffects":             "None",
 				},
+				Rules: []admissionregistrationv1.RuleWithOperations{
+					{
+						Operations: []admissionregistrationv1.OperationType{
+							admissionregistrationv1.Create,
+							admissionregistrationv1.Update,
+						},
+						Rule: admissionregistrationv1.Rule{
+							APIGroups:   []string{""},
+							APIVersions: []string{"v1"},
+							Resources:   []string{"pods"},
+						},
+					},
+				},
+				AdmissionReviewVersions: []string{"v1"},
+				SideEffects:             &sideEffects,
 			},
 		},
 	}
 
-	err := resources.PatchWebhookConfiguration(webhook, baseURL, caCert)
-	g.Expect(err).NotTo(HaveOccurred())
+	resources.PatchValidatingWebhookConfiguration(webhook, baseURL, caCert)
 
-	webhooks, found, err := unstructured.NestedSlice(webhook.Object, "webhooks")
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(found).To(BeTrue())
-
-	firstWebhook := webhooks[0].(map[string]interface{})
-	clientConfig := firstWebhook["clientConfig"].(map[string]interface{})
-
-	g.Expect(clientConfig["url"]).To(Equal(baseURL + "/validate-v1-pod"))
-	g.Expect(clientConfig["caBundle"]).To(Equal(caCert))
-	g.Expect(clientConfig).NotTo(HaveKey("service"))
-
-	g.Expect(firstWebhook["rules"]).To(HaveLen(1))
-	g.Expect(firstWebhook["admissionReviewVersions"]).To(Equal([]interface{}{"v1"}))
+	g.Expect(webhook.Webhooks).To(HaveLen(1))
+	g.Expect(webhook.Webhooks[0].ClientConfig.URL).To(Equal(ptr.To(baseURL + "/validate-v1-pod")))
+	g.Expect(webhook.Webhooks[0].ClientConfig.CABundle).To(Equal([]byte(caCert)))
+	g.Expect(webhook.Webhooks[0].ClientConfig.Service).To(BeNil())
+	g.Expect(webhook.Webhooks[0].Rules).To(HaveLen(1))
+	g.Expect(webhook.Webhooks[0].AdmissionReviewVersions).To(Equal([]string{"v1"}))
 }

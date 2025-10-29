@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/conversion"
 
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -73,6 +74,46 @@ func EnsureGroupVersionKind(
 	obj.GetObjectKind().SetGroupVersionKind(gvk)
 
 	return nil
+}
+
+// Convert converts an unstructured object to a typed object and ensures GVK is set.
+func Convert[T client.Object](
+	scheme *runtime.Scheme,
+	src *unstructured.Unstructured,
+	dst T,
+) error {
+	if err := scheme.Convert(src, dst, nil); err != nil {
+		return fmt.Errorf("failed to convert object: %w", err)
+	}
+	if err := EnsureGroupVersionKind(scheme, dst); err != nil {
+		return fmt.Errorf("failed to ensure GVK for object: %w", err)
+	}
+	return nil
+}
+
+// ExtractWebhookURLs extracts all ClientConfig URLs from a webhook configuration.
+// Returns URLs that are non-nil. Supports both MutatingWebhookConfiguration and ValidatingWebhookConfiguration.
+func ExtractWebhookURLs(obj client.Object) ([]string, error) {
+	var urls []string
+
+	switch webhook := obj.(type) {
+	case *admissionregistrationv1.MutatingWebhookConfiguration:
+		for _, wh := range webhook.Webhooks {
+			if wh.ClientConfig.URL != nil {
+				urls = append(urls, *wh.ClientConfig.URL)
+			}
+		}
+	case *admissionregistrationv1.ValidatingWebhookConfiguration:
+		for _, wh := range webhook.Webhooks {
+			if wh.ClientConfig.URL != nil {
+				urls = append(urls, *wh.ClientConfig.URL)
+			}
+		}
+	default:
+		return nil, fmt.Errorf("unsupported webhook configuration type: %T", obj)
+	}
+
+	return urls, nil
 }
 
 func FormatObjectReference(u client.Object) string {
