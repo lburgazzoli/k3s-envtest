@@ -295,6 +295,11 @@ func (e *K3sEnv) GetKubeconfig(ctx context.Context) ([]byte, error) {
 	return kc, nil
 }
 
+// CustomResourceDefinitions returns a deep copy of all CustomResourceDefinitions loaded from the provided manifests.
+//
+// Note: This method creates deep copies to prevent external modification of internal state.
+// If calling this method multiple times (e.g., in a loop), consider caching the result
+// to avoid repeated copying overhead.
 func (e *K3sEnv) CustomResourceDefinitions() []apiextensionsv1.CustomResourceDefinition {
 	result := make([]apiextensionsv1.CustomResourceDefinition, len(e.manifests.CustomResourceDefinitions))
 	for i := range e.manifests.CustomResourceDefinitions {
@@ -303,6 +308,11 @@ func (e *K3sEnv) CustomResourceDefinitions() []apiextensionsv1.CustomResourceDef
 	return result
 }
 
+// MutatingWebhookConfigurations returns a deep copy of all MutatingWebhookConfigurations loaded from the provided manifests.
+//
+// Note: This method creates deep copies to prevent external modification of internal state.
+// If calling this method multiple times (e.g., in a loop), consider caching the result
+// to avoid repeated copying overhead.
 func (e *K3sEnv) MutatingWebhookConfigurations() []admissionregistrationv1.MutatingWebhookConfiguration {
 	result := make([]admissionregistrationv1.MutatingWebhookConfiguration, len(e.manifests.MutatingWebhookConfigurations))
 	for i := range e.manifests.MutatingWebhookConfigurations {
@@ -311,6 +321,11 @@ func (e *K3sEnv) MutatingWebhookConfigurations() []admissionregistrationv1.Mutat
 	return result
 }
 
+// ValidatingWebhookConfigurations returns a deep copy of all ValidatingWebhookConfigurations loaded from the provided manifests.
+//
+// Note: This method creates deep copies to prevent external modification of internal state.
+// If calling this method multiple times (e.g., in a loop), consider caching the result
+// to avoid repeated copying overhead.
 func (e *K3sEnv) ValidatingWebhookConfigurations() []admissionregistrationv1.ValidatingWebhookConfiguration {
 	result := make([]admissionregistrationv1.ValidatingWebhookConfiguration, len(e.manifests.ValidatingWebhookConfigurations))
 	for i := range e.manifests.ValidatingWebhookConfigurations {

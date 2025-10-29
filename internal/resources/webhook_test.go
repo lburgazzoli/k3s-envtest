@@ -8,7 +8,6 @@ import (
 	"github.com/lburgazzoli/k3s-envtest/internal/resources"
 
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
@@ -16,11 +15,134 @@ import (
 )
 
 const (
-	testBaseURL     = "https://example.com:9443"
 	testCABundleStr = "test-ca-bundle-data"
 )
 
-var testCABundleBytes = []byte("test-ca-bundle-data")
+func TestExtractWebhookURLs_InvalidURL_Mutating(t *testing.T) {
+	g := NewWithT(t)
+
+	webhook := &admissionregistrationv1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-webhook"},
+		Webhooks: []admissionregistrationv1.MutatingWebhook{
+			{
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					URL: ptr.To("ht!tp://invalid"),
+				},
+			},
+		},
+	}
+
+	_, err := resources.ExtractWebhookURLs(webhook)
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("invalid URL"))
+	g.Expect(err.Error()).To(ContainSubstring("test-webhook"))
+	g.Expect(err.Error()).To(ContainSubstring("mutating"))
+}
+
+func TestExtractWebhookURLs_InvalidURL_Validating(t *testing.T) {
+	g := NewWithT(t)
+
+	webhook := &admissionregistrationv1.ValidatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-validating-webhook"},
+		Webhooks: []admissionregistrationv1.ValidatingWebhook{
+			{
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					URL: ptr.To("ht!tp://invalid-validating"),
+				},
+			},
+		},
+	}
+
+	_, err := resources.ExtractWebhookURLs(webhook)
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("invalid URL"))
+	g.Expect(err.Error()).To(ContainSubstring("test-validating-webhook"))
+	g.Expect(err.Error()).To(ContainSubstring("validating"))
+}
+
+func TestExtractWebhookURLs_ValidURL_Mutating(t *testing.T) {
+	g := NewWithT(t)
+
+	webhook := &admissionregistrationv1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-webhook"},
+		Webhooks: []admissionregistrationv1.MutatingWebhook{
+			{
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					URL: ptr.To("https://example.com/webhook"),
+				},
+			},
+		},
+	}
+
+	urls, err := resources.ExtractWebhookURLs(webhook)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(urls).To(HaveLen(1))
+	g.Expect(urls[0]).To(Equal("https://example.com/webhook"))
+}
+
+func TestExtractWebhookURLs_ValidURL_Validating(t *testing.T) {
+	g := NewWithT(t)
+
+	webhook := &admissionregistrationv1.ValidatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-webhook"},
+		Webhooks: []admissionregistrationv1.ValidatingWebhook{
+			{
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					URL: ptr.To("https://example.com/validate"),
+				},
+			},
+		},
+	}
+
+	urls, err := resources.ExtractWebhookURLs(webhook)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(urls).To(HaveLen(1))
+	g.Expect(urls[0]).To(Equal("https://example.com/validate"))
+}
+
+func TestExtractWebhookURLs_NilURL(t *testing.T) {
+	g := NewWithT(t)
+
+	webhook := &admissionregistrationv1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-webhook"},
+		Webhooks: []admissionregistrationv1.MutatingWebhook{
+			{
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					URL: nil,
+				},
+			},
+		},
+	}
+
+	urls, err := resources.ExtractWebhookURLs(webhook)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(urls).To(BeEmpty())
+}
+
+func TestExtractWebhookURLs_MultipleURLs(t *testing.T) {
+	g := NewWithT(t)
+
+	webhook := &admissionregistrationv1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-webhook"},
+		Webhooks: []admissionregistrationv1.MutatingWebhook{
+			{
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					URL: ptr.To("https://example.com/webhook1"),
+				},
+			},
+			{
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					URL: ptr.To("https://example.com/webhook2"),
+				},
+			},
+		},
+	}
+
+	urls, err := resources.ExtractWebhookURLs(webhook)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(urls).To(HaveLen(2))
+	g.Expect(urls).To(ContainElements("https://example.com/webhook1", "https://example.com/webhook2"))
+}
 
 func TestPatchWebhookConfiguration_Validating(t *testing.T) {
 	g := NewWithT(t)
@@ -143,47 +265,6 @@ func TestPatchWebhookConfiguration_DefaultPath(t *testing.T) {
 	resources.PatchValidatingWebhookConfiguration(webhook, testBaseURL, testCABundleStr)
 
 	g.Expect(webhook.Webhooks[0].ClientConfig.URL).To(Equal(ptr.To(testBaseURL + "/")))
-}
-
-func TestPatchCRDConversion_Success(t *testing.T) {
-	g := NewWithT(t)
-
-	crd := &apiextensionsv1.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "examples.test.example.com",
-		},
-		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
-			Group: "test.example.com",
-			Names: apiextensionsv1.CustomResourceDefinitionNames{
-				Kind:   "Example",
-				Plural: "examples",
-			},
-			Scope: apiextensionsv1.NamespaceScoped,
-			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
-				{
-					Name:    "v1",
-					Served:  true,
-					Storage: true,
-				},
-				{
-					Name:    "v1beta1",
-					Served:  true,
-					Storage: false,
-				},
-			},
-		},
-	}
-
-	resources.PatchCRDConversion(crd, testBaseURL, testCABundleBytes)
-
-	g.Expect(crd.Spec.Conversion).NotTo(BeNil())
-	g.Expect(crd.Spec.Conversion.Strategy).To(Equal(apiextensionsv1.WebhookConverter))
-	g.Expect(crd.Spec.Conversion.Webhook).NotTo(BeNil())
-	g.Expect(crd.Spec.Conversion.Webhook.ConversionReviewVersions).To(Equal([]string{"v1", "v1beta1"}))
-	g.Expect(crd.Spec.Conversion.Webhook.ClientConfig).NotTo(BeNil())
-	g.Expect(crd.Spec.Conversion.Webhook.ClientConfig.URL).NotTo(BeNil())
-	g.Expect(*crd.Spec.Conversion.Webhook.ClientConfig.URL).To(Equal(testBaseURL + "/convert"))
-	g.Expect(crd.Spec.Conversion.Webhook.ClientConfig.CABundle).To(Equal(testCABundleBytes))
 }
 
 func TestPatchWebhookConfiguration_RealWorldExample(t *testing.T) {

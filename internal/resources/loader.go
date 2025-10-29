@@ -47,6 +47,10 @@ func loadFromFile(
 
 // loadFromDirectory loads Kubernetes manifests from all YAML files in a directory (flat, non-recursive).
 // Only processes files with .yaml or .yml extensions. Applies the optional filter.
+//
+// Note: This function is NOT recursive. Files in subdirectories are not loaded.
+// To load subdirectories, call LoadFromPaths with multiple directory paths.
+//
 // Returns all objects if filter is nil.
 func loadFromDirectory(
 	dir string,
@@ -83,6 +87,10 @@ func loadFromDirectory(
 // loadFromPath loads Kubernetes manifests from a file or directory.
 // If the path is a directory, loads from all YAML files in it (flat, non-recursive).
 // If the path is a file, loads from that file.
+//
+// Note: Directory loading is NOT recursive. Files in subdirectories are not loaded.
+// To load subdirectories, call LoadFromPaths with multiple directory paths.
+//
 // Applies the optional filter. Returns all objects if filter is nil.
 func loadFromPath(
 	path string,

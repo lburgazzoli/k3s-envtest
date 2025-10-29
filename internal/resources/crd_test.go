@@ -372,3 +372,50 @@ func (f *fakeCRDClient) GroupVersionKindFor(obj runtime.Object) (schema.GroupVer
 func (f *fakeCRDClient) IsObjectNamespaced(obj runtime.Object) (bool, error) {
 	return false, nil
 }
+
+const (
+	testBaseURL = "https://example.com:9443"
+)
+
+var testCABundleBytes = []byte("test-ca-bundle-data")
+
+func TestPatchCRDConversion_Success(t *testing.T) {
+	g := NewWithT(t)
+
+	crd := &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "examples.test.example.com",
+		},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: "test.example.com",
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Kind:   "Example",
+				Plural: "examples",
+			},
+			Scope: apiextensionsv1.NamespaceScoped,
+			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1",
+					Served:  true,
+					Storage: true,
+				},
+				{
+					Name:    "v1beta1",
+					Served:  true,
+					Storage: false,
+				},
+			},
+		},
+	}
+
+	resources.PatchCRDConversion(crd, testBaseURL, testCABundleBytes)
+
+	g.Expect(crd.Spec.Conversion).NotTo(BeNil())
+	g.Expect(crd.Spec.Conversion.Strategy).To(Equal(apiextensionsv1.WebhookConverter))
+	g.Expect(crd.Spec.Conversion.Webhook).NotTo(BeNil())
+	g.Expect(crd.Spec.Conversion.Webhook.ConversionReviewVersions).To(Equal([]string{"v1", "v1beta1"}))
+	g.Expect(crd.Spec.Conversion.Webhook.ClientConfig).NotTo(BeNil())
+	g.Expect(crd.Spec.Conversion.Webhook.ClientConfig.URL).NotTo(BeNil())
+	g.Expect(*crd.Spec.Conversion.Webhook.ClientConfig.URL).To(Equal(testBaseURL + "/convert"))
+	g.Expect(crd.Spec.Conversion.Webhook.ClientConfig.CABundle).To(Equal(testCABundleBytes))
+}

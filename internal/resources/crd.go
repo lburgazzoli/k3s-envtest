@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/utils/ptr"
 )
 
 // FilterConvertibleCRDs filters a list of CRDs to only include those that support
@@ -83,4 +84,23 @@ func WaitForCRDEstablished(
 	}
 
 	return nil
+}
+
+// PatchCRDConversion patches a CustomResourceDefinition to use webhook-based conversion.
+// It modifies the CRD in-place.
+func PatchCRDConversion(
+	crd *apiextensionsv1.CustomResourceDefinition,
+	baseURL string,
+	caBundle []byte,
+) {
+	crd.Spec.Conversion = &apiextensionsv1.CustomResourceConversion{
+		Strategy: apiextensionsv1.WebhookConverter,
+		Webhook: &apiextensionsv1.WebhookConversion{
+			ConversionReviewVersions: []string{"v1", "v1beta1"},
+			ClientConfig: &apiextensionsv1.WebhookClientConfig{
+				URL:      ptr.To(baseURL + "/convert"),
+				CABundle: caBundle,
+			},
+		},
+	}
 }

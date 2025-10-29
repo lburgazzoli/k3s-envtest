@@ -1,4 +1,3 @@
-//nolint:dupl
 package k3senv
 
 import (
@@ -13,43 +12,20 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-func (e *K3sEnv) installMutatingWebhook(
+func (e *K3sEnv) installWebhook(
 	ctx context.Context,
-	webhook *admissionregistrationv1.MutatingWebhookConfiguration,
+	webhook client.Object,
 	baseURL string,
 	caBundle string,
 ) error {
-	resources.PatchMutatingWebhookConfiguration(webhook, baseURL, caBundle)
-
-	if err := resources.EnsureGroupVersionKind(e.options.Scheme, webhook); err != nil {
-		return fmt.Errorf("failed to set GVK for webhook %s: %w", webhook.GetName(), err)
+	switch wh := webhook.(type) {
+	case *admissionregistrationv1.MutatingWebhookConfiguration:
+		resources.PatchMutatingWebhookConfiguration(wh, baseURL, caBundle)
+	case *admissionregistrationv1.ValidatingWebhookConfiguration:
+		resources.PatchValidatingWebhookConfiguration(wh, baseURL, caBundle)
+	default:
+		return fmt.Errorf("unsupported webhook type: %T", webhook)
 	}
-
-	err := e.cli.Patch(ctx, webhook, client.Apply, client.ForceOwnership, client.FieldOwner("k3s-envtest"))
-	if err != nil {
-		return fmt.Errorf("failed to apply webhook %s: %w", webhook.GetName(), err)
-	}
-
-	e.debugf("Webhook configuration %s applied", webhook.GetName())
-
-	if !ptr.Deref(e.options.Webhook.CheckReadiness, false) {
-		return nil
-	}
-
-	if err := e.waitForWebhookEndpointsReady(ctx, webhook, e.options.Webhook.Port); err != nil {
-		return fmt.Errorf("webhook config %s endpoints not ready: %w", webhook.GetName(), err)
-	}
-
-	return nil
-}
-
-func (e *K3sEnv) installValidatingWebhook(
-	ctx context.Context,
-	webhook *admissionregistrationv1.ValidatingWebhookConfiguration,
-	baseURL string,
-	caBundle string,
-) error {
-	resources.PatchValidatingWebhookConfiguration(webhook, baseURL, caBundle)
 
 	if err := resources.EnsureGroupVersionKind(e.options.Scheme, webhook); err != nil {
 		return fmt.Errorf("failed to set GVK for webhook %s: %w", webhook.GetName(), err)
@@ -82,14 +58,14 @@ func (e *K3sEnv) installWebhooks(
 
 	mutating := e.MutatingWebhookConfigurations()
 	for i := range mutating {
-		if err := e.installMutatingWebhook(ctx, &mutating[i], baseURL, caBundle); err != nil {
+		if err := e.installWebhook(ctx, &mutating[i], baseURL, caBundle); err != nil {
 			return err
 		}
 	}
 
 	validating := e.ValidatingWebhookConfigurations()
 	for i := range validating {
-		if err := e.installValidatingWebhook(ctx, &validating[i], baseURL, caBundle); err != nil {
+		if err := e.installWebhook(ctx, &validating[i], baseURL, caBundle); err != nil {
 			return err
 		}
 	}
