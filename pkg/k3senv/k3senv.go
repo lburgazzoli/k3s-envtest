@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/lburgazzoli/k3s-envtest/internal/cert"
 	"github.com/lburgazzoli/k3s-envtest/internal/gvk"
@@ -76,20 +75,6 @@ type Manifests struct {
 	CustomResourceDefinitions       []apiextensionsv1.CustomResourceDefinition
 	MutatingWebhookConfigurations   []admissionregistrationv1.MutatingWebhookConfiguration
 	ValidatingWebhookConfigurations []admissionregistrationv1.ValidatingWebhookConfiguration
-}
-
-// loggerConsumer forwards testcontainer logs to the k3senv Logger.
-type loggerConsumer struct {
-	logger Logger
-}
-
-func (lc *loggerConsumer) Accept(log testcontainers.Log) {
-	if lc.logger != nil {
-		message := strings.TrimSpace(string(log.Content))
-		if message != "" {
-			lc.logger.Logf("[k3s] %s", message)
-		}
-	}
 }
 
 type K3sEnv struct {
@@ -171,6 +156,10 @@ func New(opts ...Option) (*K3sEnv, error) {
 // The Stop() method is safe to call even if Start() fails partway through,
 // as it handles nil/uninitialized fields gracefully.
 func (e *K3sEnv) Start(ctx context.Context) error {
+	// Configure testcontainers global logger based on user preferences.
+	// WARNING: This modifies global state and affects all testcontainers in this process.
+	e.configureTestcontainersLogger()
+
 	e.debugf("Starting k3s environment with image: %s", e.options.K3s.Image)
 	if len(e.options.K3s.Args) > 0 {
 		e.debugf("Using custom k3s arguments: %v", e.options.K3s.Args)

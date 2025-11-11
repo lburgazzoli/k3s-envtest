@@ -128,6 +128,14 @@ type ManifestConfig struct {
 	Objects []client.Object `mapstructure:"-"`
 }
 
+// LoggingConfig groups all logging-related configuration.
+type LoggingConfig struct {
+	// Enabled controls whether testcontainers lifecycle logging is enabled.
+	// When disabled, testcontainers framework messages are completely suppressed.
+	// Defaults to true (enabled with emoji filtering).
+	Enabled *bool `mapstructure:"enabled"`
+}
+
 type Options struct {
 	Scheme      *runtime.Scheme   `mapstructure:"-"`
 	Webhook     WebhookConfig     `mapstructure:"webhook"`
@@ -135,6 +143,7 @@ type Options struct {
 	K3s         K3sConfig         `mapstructure:"k3s"`
 	Certificate CertificateConfig `mapstructure:"certificate"`
 	Manifest    ManifestConfig    `mapstructure:"manifest"`
+	Logging     LoggingConfig     `mapstructure:"logging"`
 	Logger      Logger            `mapstructure:"-"`
 }
 
@@ -203,6 +212,11 @@ func (o *Options) ApplyToOptions(target *Options) {
 	}
 	if len(o.Manifest.Objects) > 0 {
 		target.Manifest.Objects = append(target.Manifest.Objects, o.Manifest.Objects...)
+	}
+
+	// Logging config
+	if o.Logging.Enabled != nil {
+		target.Logging.Enabled = o.Logging.Enabled
 	}
 
 	// Logger
@@ -295,6 +309,29 @@ func WithLogger(logger Logger) Option {
 	return optionFunc(func(o *Options) { o.Logger = logger })
 }
 
+// Logging options
+
+// WithTestcontainersLogging controls whether testcontainers lifecycle logging is enabled.
+// When enabled with a logger, testcontainers framework messages are forwarded to the logger
+// without emojis. When disabled, all testcontainers lifecycle logging is suppressed.
+// Default is true (enabled with emoji filtering).
+func WithTestcontainersLogging(enable bool) Option {
+	return optionFunc(func(o *Options) { o.Logging.Enabled = &enable })
+}
+
+// SuppressTestcontainersLogging is a convenience function that returns an Option
+// to completely suppress testcontainers lifecycle logging.
+// This is equivalent to WithTestcontainersLogging(false).
+//
+// Usage:
+//
+//	env, err := k3senv.New(
+//	    k3senv.SuppressTestcontainersLogging(),
+//	)
+func SuppressTestcontainersLogging() Option {
+	return WithTestcontainersLogging(false)
+}
+
 // LoadConfigFromEnv loads configuration from environment variables with K3SENV_ prefix
 // and returns an Options struct that can be used with New().
 func LoadConfigFromEnv() (*Options, error) {
@@ -322,6 +359,7 @@ func LoadConfigFromEnv() (*Options, error) {
 	v.SetDefault("certificate.path", "")
 	v.SetDefault("certificate.validity", DefaultCertValidity)
 	v.SetDefault("manifest.paths", []string{})
+	v.SetDefault("logging.enabled", true)
 
 	var opts Options
 
@@ -338,6 +376,9 @@ func LoadConfigFromEnv() (*Options, error) {
 	}
 	if opts.K3s.LogRedirection == nil {
 		opts.K3s.LogRedirection = ptr.To(DefaultK3sLogRedirection)
+	}
+	if opts.Logging.Enabled == nil {
+		opts.Logging.Enabled = ptr.To(true)
 	}
 
 	return &opts, nil

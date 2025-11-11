@@ -278,6 +278,89 @@ func TestLoggerFunc(t *testing.T) {
 	g.Expect(env).NotTo(BeNil())
 }
 
+func TestTestcontainersLogging_WithTestcontainersLogging(t *testing.T) {
+	g := NewWithT(t)
+	var logMessages []string
+	mockLogger := &mockLogger{messages: &logMessages}
+
+	// Create environment with testcontainers logging enabled (default)
+	env, err := k3senv.New(
+		k3senv.WithLogger(mockLogger),
+		k3senv.WithTestcontainersLogging(true),
+		k3senv.WithCertPath(testCertPath),
+	)
+
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(env).NotTo(BeNil())
+}
+
+func TestTestcontainersLogging_SuppressTestcontainersLogging(t *testing.T) {
+	g := NewWithT(t)
+
+	// Create environment with testcontainers logging suppressed
+	env, err := k3senv.New(
+		k3senv.SuppressTestcontainersLogging(),
+		k3senv.WithCertPath(testCertPath),
+	)
+
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(env).NotTo(BeNil())
+}
+
+func TestTestcontainersLogging_EnvironmentVariable(t *testing.T) {
+	g := NewWithT(t)
+
+	// Test with environment variable set to false
+	t.Setenv("K3SENV_LOGGING_ENABLED", "false")
+
+	opts, err := k3senv.LoadConfigFromEnv()
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(opts.Logging.Enabled).NotTo(BeNil())
+	g.Expect(*opts.Logging.Enabled).To(BeFalse())
+
+	// Remove env var
+	g.Expect(os.Unsetenv("K3SENV_LOGGING_ENABLED")).NotTo(HaveOccurred())
+
+	// Test default value (should be true)
+	opts2, err := k3senv.LoadConfigFromEnv()
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(opts2.Logging.Enabled).NotTo(BeNil())
+	g.Expect(*opts2.Logging.Enabled).To(BeTrue())
+}
+
+func TestTestcontainersLogging_ExplicitOptionOverridesEnv(t *testing.T) {
+	g := NewWithT(t)
+
+	// Set env var to disable
+	t.Setenv("K3SENV_LOGGING_ENABLED", "false")
+
+	// Explicit option should override env var
+	env, err := k3senv.New(
+		k3senv.WithTestcontainersLogging(true),
+		k3senv.WithCertPath(testCertPath),
+	)
+
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(env).NotTo(BeNil())
+}
+
+func TestTestcontainersLogging_StructStyle(t *testing.T) {
+	g := NewWithT(t)
+
+	// Test struct-style configuration
+	env, err := k3senv.New(&k3senv.Options{
+		Logging: k3senv.LoggingConfig{
+			Enabled: k3senv.Bool(false),
+		},
+		Certificate: k3senv.CertificateConfig{
+			Path: testCertPath,
+		},
+	})
+
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(env).NotTo(BeNil())
+}
+
 // mockLogger implements the Logger interface for testing.
 type mockLogger struct {
 	messages *[]string

@@ -15,7 +15,7 @@ This library was extracted from the opendatahub-operator project and made indepe
 ## Recent Improvements (2024)
 
 Recent architectural enhancements include:
-- **Structured Configuration System** - Replaced flat Options with logical groupings (WebhookConfig, CRDConfig, K3sConfig, etc.)
+- **Structured Configuration System** - Replaced flat Options with logical groupings (WebhookConfig, CRDConfig, K3sConfig, LoggingConfig, etc.)
 - **Environment Variable Support** - Added Viper-based configuration with K3SENV_ prefix using mapstructure tags
 - **Simplified K3sEnv Architecture** - Eliminated field duplication by using single Options struct directly
 - **Centralized Default Options** - Created NewDefaultOptions() function in k3senv_opts.go for better organization
@@ -23,6 +23,7 @@ Recent architectural enhancements include:
 - **Custom K3s Arguments** - Added support for custom k3s server arguments via WithK3sArgs()
 - **Component-Specific Polling** - Separate PollInterval configuration for CRD (100ms) and Webhook (500ms) components
 - **Container Log Redirection** - Forward k3s container logs to configurable Logger interface with [k3s] prefix
+- **Testcontainers Lifecycle Logging** - Forward testcontainers framework logs with emoji filtering via [testcontainers] prefix
 - **Structured Logging Interface** - Logger interface compatible with testing.T and debugging support
 - **Generic JQ Functions** - Type-safe JQ queries (QueryTyped[T], QuerySlice[T], QueryMap[K,V]) reduce boilerplate by 70%
 - **Pointer Booleans** - Boolean config fields use *bool to distinguish "not set" from "false" (breaking change)

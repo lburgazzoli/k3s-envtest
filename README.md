@@ -280,17 +280,66 @@ func TestWithLogging(t *testing.T) {
 When a Logger is configured, k3s-envtest provides:
 - **Debug logging**: Operations, timing, and configuration details
 - **Container log redirection**: k3s container logs are forwarded to your logger with `[k3s]` prefix
+- **Testcontainers lifecycle logging**: Framework messages (container creation, etc.) with `[testcontainers]` prefix, **without emojis**
 - **Performance insights**: Monitor polling intervals and timing to optimize configuration
 
 Example log output:
 ```
+[testcontainers] Creating container for image rancher/k3s:v1.32.9-k3s1
+[testcontainers] Container created: abc123def456
 [k3senv] Starting k3s environment with image: rancher/k3s:v1.32.9-k3s1
 [k3s] 2024/01/15 10:30:15 [INFO]  Starting k3s server
 [k3senv] Generated certificates in: /tmp/k3senv-certs-abc123
 [k3senv] Loaded 5 manifests
 [k3s] 2024/01/15 10:30:20 [INFO]  Kubernetes API server listening on port 6443
+[testcontainers] Container started successfully
 [k3senv] k3s environment started successfully
 ```
+
+#### Controlling Testcontainers Logging
+
+By default, testcontainers lifecycle logging is **enabled with emoji filtering** when a logger is configured. You can control this behavior:
+
+**Suppress all testcontainers lifecycle logging:**
+```go
+env, err := k3senv.New(
+    k3senv.WithLogger(t),
+    k3senv.SuppressTestcontainersLogging(), // No testcontainers framework messages
+    k3senv.WithManifests("testdata/crds"),
+)
+```
+
+**Explicitly enable/disable:**
+```go
+// Disable
+env, err := k3senv.New(
+    k3senv.WithLogger(t),
+    k3senv.WithTestcontainersLogging(false),
+)
+
+// Enable (default when logger is set)
+env, err := k3senv.New(
+    k3senv.WithLogger(t),
+    k3senv.WithTestcontainersLogging(true), // Redundant but explicit
+)
+```
+
+**Via environment variables:**
+```bash
+export K3SENV_LOGGING_ENABLED=false  # Disable testcontainers logging
+```
+
+**Via structured config:**
+```go
+env, err := k3senv.New(&k3senv.Options{
+    Logger: t,
+    Logging: k3senv.LoggingConfig{
+        Enabled: k3senv.Bool(false), // Suppress testcontainers logging
+    },
+})
+```
+
+> **Note:** Testcontainers logging configuration modifies **global state** (via `testcontainers.log.SetDefault()`). This affects all testcontainers in the same process. The setting is applied when `env.Start()` is called.
 
 ## Examples
 
