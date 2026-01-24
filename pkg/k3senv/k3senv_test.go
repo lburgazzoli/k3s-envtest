@@ -2,11 +2,17 @@ package k3senv_test
 
 import (
 	"context"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/lburgazzoli/k3s-envtest/internal/testdata/v1alpha1"
 	"github.com/lburgazzoli/k3s-envtest/internal/testdata/v1beta1"
 	"github.com/lburgazzoli/k3s-envtest/pkg/k3senv"
+	"github.com/testcontainers/testcontainers-go"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -25,6 +31,53 @@ import (
 //nolint:gochecknoinits
 func init() {
 	log.SetLogger(zap.New(zap.UseDevMode(true)))
+}
+
+// TestHostGatewayAccess verifies that host.containers.internal:host-gateway
+// allows container-to-host communication. This is the mechanism used for
+// Podman compatibility instead of testcontainers.WithHostPortAccess().
+func TestHostGatewayAccess(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	// Start a simple HTTP server on the host
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK"))
+	}))
+	defer server.Close()
+
+	// Parse the port from the server URL
+	serverURL, err := url.Parse(server.URL)
+	g.Expect(err).NotTo(HaveOccurred())
+	hostPort := serverURL.Port()
+
+	// Start a container with host-gateway access using CustomizeRequest
+	// (not WithHostConfigModifier, which overwrites existing modifiers)
+	ctr, err := testcontainers.Run(ctx,
+		"curlimages/curl:latest",
+		testcontainers.CustomizeRequest(testcontainers.GenericContainerRequest{
+			ContainerRequest: testcontainers.ContainerRequest{
+				ExtraHosts: []string{k3senv.DefaultWebhookContainerHost + ":host-gateway"},
+			},
+		}),
+		testcontainers.WithCmd("sleep", "infinity"),
+	)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	t.Cleanup(func() {
+		_ = testcontainers.TerminateContainer(ctr)
+	})
+
+	// Execute curl from inside the container to reach the host
+	hostAddr := net.JoinHostPort(k3senv.DefaultWebhookContainerHost, hostPort)
+	code, reader, err := ctr.Exec(ctx, []string{
+		"curl", "-sf", "http://" + hostAddr,
+	})
+	g.Expect(err).NotTo(HaveOccurred())
+
+	body, _ := io.ReadAll(reader)
+	g.Expect(code).To(Equal(0), "curl should succeed, got output: %s", string(body))
 }
 
 // Test constants.
@@ -264,7 +317,7 @@ func testAdmissionWebhookConfiguration(
 	err = env.Client().Get(ctx, client.ObjectKey{Name: webhook.GetName()}, installedWebhook)
 	g.Expect(err).NotTo(HaveOccurred())
 
-	expectedURL := "https://host.testcontainers.internal:9443" + expectedPath
+	expectedURL := "https://host.containers.internal:9443" + expectedPath
 
 	// Use type switch to handle both webhook types
 	switch wh := installedWebhook.(type) {
@@ -291,7 +344,9 @@ func TestK3sEnv_GetKubeconfig_Success(t *testing.T) {
 	g := NewWithT(t)
 	ctx := context.Background()
 
-	env, err := k3senv.New(k3senv.WithCertPath(t.TempDir()))
+	env, err := k3senv.New(
+		k3senv.WithCertPath(t.TempDir()),
+	)
 	g.Expect(err).NotTo(HaveOccurred())
 	t.Cleanup(func() {
 		_ = env.Stop(ctx)
@@ -329,7 +384,9 @@ func TestK3sEnv_GetKubeconfig_MatchesConfig(t *testing.T) {
 	g := NewWithT(t)
 	ctx := context.Background()
 
-	env, err := k3senv.New(k3senv.WithCertPath(t.TempDir()))
+	env, err := k3senv.New(
+		k3senv.WithCertPath(t.TempDir()),
+	)
 	g.Expect(err).NotTo(HaveOccurred())
 	t.Cleanup(func() {
 		_ = env.Stop(ctx)
@@ -383,7 +440,7 @@ func TestInstallWebhooks_ConvertibleCRD_ConfiguresConversionEndpoint(t *testing.
 		"Strategy": Equal(apiextensionsv1.WebhookConverter),
 		"Webhook": PointTo(MatchFields(IgnoreExtras, Fields{
 			"ClientConfig": PointTo(MatchFields(IgnoreExtras, Fields{
-				"URL":      PointTo(ContainSubstring("https://host.testcontainers.internal:9443/convert")),
+				"URL":      PointTo(ContainSubstring("https://host.containers.internal:9443/convert")),
 				"CABundle": Not(BeEmpty()),
 			})),
 			"ConversionReviewVersions": ContainElement("v1"),
@@ -501,7 +558,7 @@ func TestInstallWebhooks_WebhookWithDefaultPath_UsesSlash(t *testing.T) {
 	g.Expect(err).NotTo(HaveOccurred())
 
 	g.Expect(installedWebhook.Webhooks).To(HaveLen(1))
-	g.Expect(installedWebhook.Webhooks[0].ClientConfig.URL).To(PointTo(Equal("https://host.testcontainers.internal:9443/")))
+	g.Expect(installedWebhook.Webhooks[0].ClientConfig.URL).To(PointTo(Equal("https://host.containers.internal:9443/")))
 }
 
 func TestInstallWebhooks_MultipleWebhooks_ConfiguresAll(t *testing.T) {
@@ -591,8 +648,8 @@ func TestInstallWebhooks_MultipleWebhooks_ConfiguresAll(t *testing.T) {
 	g.Expect(err).NotTo(HaveOccurred())
 
 	g.Expect(installedWebhook.Webhooks).To(HaveLen(2))
-	g.Expect(installedWebhook.Webhooks[0].ClientConfig.URL).To(PointTo(Equal("https://host.testcontainers.internal:9443/validate1")))
-	g.Expect(installedWebhook.Webhooks[1].ClientConfig.URL).To(PointTo(Equal("https://host.testcontainers.internal:9443/validate2")))
+	g.Expect(installedWebhook.Webhooks[0].ClientConfig.URL).To(PointTo(Equal("https://host.containers.internal:9443/validate1")))
+	g.Expect(installedWebhook.Webhooks[1].ClientConfig.URL).To(PointTo(Equal("https://host.containers.internal:9443/validate2")))
 	g.Expect(installedWebhook.Webhooks[0].ClientConfig.CABundle).NotTo(BeEmpty())
 	g.Expect(installedWebhook.Webhooks[1].ClientConfig.CABundle).NotTo(BeEmpty())
 	g.Expect(installedWebhook.Webhooks[0].ClientConfig.CABundle).To(Equal(installedWebhook.Webhooks[1].ClientConfig.CABundle))

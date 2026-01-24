@@ -10,12 +10,14 @@ import (
 	"path/filepath"
 	"strconv"
 
+	dockercontainer "github.com/docker/docker/api/types/container"
 	"github.com/lburgazzoli/k3s-envtest/internal/cert"
 	"github.com/lburgazzoli/k3s-envtest/internal/gvk"
 	"github.com/lburgazzoli/k3s-envtest/internal/resources"
 	"github.com/lburgazzoli/k3s-envtest/internal/resources/filter"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/k3s"
+	"github.com/testcontainers/testcontainers-go/network"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlwebhook "sigs.k8s.io/controller-runtime/pkg/webhook"
 
@@ -33,6 +35,11 @@ const (
 	// It binds to all network interfaces (0.0.0.0) to allow connections from containers.
 	DefaultWebhookServerHost = "0.0.0.0"
 
+	// DefaultWebhookContainerHost is the hostname containers use to reach the host machine.
+	// This is mapped to host-gateway in the container's /etc/hosts, enabling container-to-host
+	// communication on both Docker and Podman (4.1+).
+	DefaultWebhookContainerHost = "host.containers.internal"
+
 	// WebhookURLScheme is the URL scheme used for webhook endpoints.
 	// Always HTTPS since webhooks require TLS certificates.
 	WebhookURLScheme = "https"
@@ -47,6 +54,7 @@ var (
 	// Docker networking hostnames and IP addresses to ensure webhooks can connect
 	// across different container networking configurations.
 	CertificateSANs = []string{
+		"host.containers.internal", // Primary: works on both Docker and Podman
 		"host.docker.internal",
 		"host.testcontainers.internal",
 		"localhost",
@@ -324,7 +332,7 @@ func (e *K3sEnv) ValidatingWebhookConfigurations() []admissionregistrationv1.Val
 }
 
 func (e *K3sEnv) WebhookHost() string {
-	return net.JoinHostPort("host.testcontainers.internal", strconv.Itoa(e.options.Webhook.Port))
+	return net.JoinHostPort(DefaultWebhookContainerHost, strconv.Itoa(e.options.Webhook.Port))
 }
 
 func (e *K3sEnv) WebhookServer() ctrlwebhook.Server {
@@ -400,7 +408,26 @@ func (e *K3sEnv) InstallCRD(
 
 func (e *K3sEnv) startK3sContainer(ctx context.Context) error {
 	opts := []testcontainers.ContainerCustomizer{
-		testcontainers.WithHostPortAccess(e.options.Webhook.Port),
+		withHostAccess(),
+	}
+
+	// Apply network configuration if specified
+	if e.options.K3s.Network != nil {
+		if e.options.K3s.Network.Name != "" {
+			aliases := e.options.K3s.Network.Aliases
+			if aliases == nil {
+				aliases = []string{}
+			}
+			e.debugf("Using custom Docker network: %s with aliases: %v", e.options.K3s.Network.Name, aliases)
+			opts = append(opts, network.WithNetworkName(aliases, e.options.K3s.Network.Name))
+		} else if len(e.options.K3s.Network.Aliases) > 0 {
+			e.debugf("Setting network aliases: %v", e.options.K3s.Network.Aliases)
+		}
+
+		if e.options.K3s.Network.Mode != "" {
+			e.debugf("Using network mode: %s", e.options.K3s.Network.Mode)
+			opts = append(opts, withNetworkMode(e.options.K3s.Network.Mode))
+		}
 	}
 
 	// If custom k3s arguments are provided, modify the container command
@@ -425,6 +452,29 @@ func (e *K3sEnv) startK3sContainer(ctx context.Context) error {
 	}
 	e.container = container
 	return nil
+}
+
+// withHostAccess enables container -> host communication by adding
+// host.containers.internal to the container's /etc/hosts, mapped to host-gateway.
+// This works on both Docker and Podman (4.1+).
+//
+// Note: We use CustomizeRequest instead of WithHostConfigModifier because
+// WithHostConfigModifier replaces any existing modifier (like k3s's privileged setting).
+// CustomizeRequest merges the ExtraHosts slice properly.
+func withHostAccess() testcontainers.ContainerCustomizer {
+	return testcontainers.CustomizeRequest(testcontainers.GenericContainerRequest{
+		ContainerRequest: testcontainers.ContainerRequest{
+			ExtraHosts: []string{DefaultWebhookContainerHost + ":host-gateway"},
+		},
+	})
+}
+
+// withNetworkMode creates a customizer that sets the container's network mode.
+func withNetworkMode(mode string) testcontainers.ContainerCustomizer {
+	return testcontainers.CustomizeRequestOption(func(req *testcontainers.GenericContainerRequest) error {
+		req.NetworkMode = dockercontainer.NetworkMode(mode)
+		return nil
+	})
 }
 
 func (e *K3sEnv) setupKubeConfig(ctx context.Context) error {

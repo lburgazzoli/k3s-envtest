@@ -361,6 +361,100 @@ func TestTestcontainersLogging_StructStyle(t *testing.T) {
 	g.Expect(env).NotTo(BeNil())
 }
 
+func TestNetworkConfig(t *testing.T) {
+	t.Run("WithK3sNetwork sets network name", func(t *testing.T) {
+		g := NewWithT(t)
+		opts := &k3senv.Options{
+			K3s: k3senv.K3sConfig{
+				Image: k3senv.DefaultK3sImage,
+			},
+		}
+
+		k3senv.WithK3sNetwork("custom-net").ApplyToOptions(opts)
+
+		g.Expect(opts.K3s.Network).NotTo(BeNil())
+		g.Expect(opts.K3s.Network.Name).To(Equal("custom-net"))
+	})
+
+	t.Run("WithK3sNetworkAliases sets aliases", func(t *testing.T) {
+		g := NewWithT(t)
+		opts := &k3senv.Options{
+			K3s: k3senv.K3sConfig{
+				Image: k3senv.DefaultK3sImage,
+			},
+		}
+
+		k3senv.WithK3sNetworkAliases("k3s.local", "kubernetes.local").ApplyToOptions(opts)
+
+		g.Expect(opts.K3s.Network).NotTo(BeNil())
+		g.Expect(opts.K3s.Network.Aliases).To(ConsistOf("k3s.local", "kubernetes.local"))
+	})
+
+	t.Run("WithK3sNetworkMode sets mode", func(t *testing.T) {
+		g := NewWithT(t)
+		opts := &k3senv.Options{
+			K3s: k3senv.K3sConfig{
+				Image: k3senv.DefaultK3sImage,
+			},
+		}
+
+		k3senv.WithK3sNetworkMode("bridge").ApplyToOptions(opts)
+
+		g.Expect(opts.K3s.Network).NotTo(BeNil())
+		g.Expect(opts.K3s.Network.Mode).To(Equal("bridge"))
+	})
+
+	t.Run("Multiple network options combine correctly", func(t *testing.T) {
+		g := NewWithT(t)
+		opts := &k3senv.Options{
+			K3s: k3senv.K3sConfig{
+				Image: k3senv.DefaultK3sImage,
+			},
+		}
+
+		opts.ApplyOptions([]k3senv.Option{
+			k3senv.WithK3sNetwork("custom-net"),
+			k3senv.WithK3sNetworkAliases("k3s.local"),
+			k3senv.WithK3sNetworkMode("bridge"),
+		})
+
+		g.Expect(opts.K3s.Network).NotTo(BeNil())
+		g.Expect(opts.K3s.Network.Name).To(Equal("custom-net"))
+		g.Expect(opts.K3s.Network.Aliases).To(ContainElement("k3s.local"))
+		g.Expect(opts.K3s.Network.Mode).To(Equal("bridge"))
+	})
+
+	t.Run("Invalid network mode returns validation error", func(t *testing.T) {
+		g := NewWithT(t)
+
+		_, err := k3senv.New(&k3senv.Options{
+			K3s: k3senv.K3sConfig{
+				Network: &k3senv.NetworkConfig{
+					Mode: "invalid-mode",
+				},
+			},
+		})
+
+		g.Expect(err).To(HaveOccurred())
+		g.Expect(err.Error()).To(ContainSubstring("network mode must be one of"))
+	})
+
+	t.Run("Valid container network mode passes validation", func(t *testing.T) {
+		g := NewWithT(t)
+
+		env, err := k3senv.New(&k3senv.Options{
+			K3s: k3senv.K3sConfig{
+				Network: &k3senv.NetworkConfig{
+					Mode: "container:my-container-id",
+				},
+			},
+		})
+
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(env).NotTo(BeNil())
+	})
+}
+
 // mockLogger implements the Logger interface for testing.
 type mockLogger struct {
 	messages *[]string

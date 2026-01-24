@@ -109,11 +109,27 @@ type CRDConfig struct {
 	PollInterval time.Duration `mapstructure:"poll_interval"`
 }
 
+// NetworkConfig groups all Docker network-related configuration for the k3s container.
+type NetworkConfig struct {
+	// Name specifies the Docker network to connect the container to.
+	// If empty, uses the default bridge network.
+	Name string `mapstructure:"name"`
+
+	// Aliases are DNS aliases for the container within the Docker network.
+	// Useful for service discovery within custom networks.
+	Aliases []string `mapstructure:"aliases"`
+
+	// Mode specifies the Docker network mode (bridge, host, none, container:<name>).
+	// If empty, uses Docker default (bridge).
+	Mode string `mapstructure:"mode"`
+}
+
 // K3sConfig groups all k3s-related configuration.
 type K3sConfig struct {
-	Image          string   `mapstructure:"image"`
-	Args           []string `mapstructure:"args"`
-	LogRedirection *bool    `mapstructure:"log_redirection"`
+	Image          string         `mapstructure:"image"`
+	Args           []string       `mapstructure:"args"`
+	LogRedirection *bool          `mapstructure:"log_redirection"`
+	Network        *NetworkConfig `mapstructure:"network"`
 }
 
 // CertificateConfig groups all certificate-related configuration.
@@ -196,6 +212,20 @@ func (o *Options) ApplyToOptions(target *Options) {
 	}
 	if o.K3s.LogRedirection != nil {
 		target.K3s.LogRedirection = o.K3s.LogRedirection
+	}
+	if o.K3s.Network != nil {
+		if target.K3s.Network == nil {
+			target.K3s.Network = &NetworkConfig{}
+		}
+		if o.K3s.Network.Name != "" {
+			target.K3s.Network.Name = o.K3s.Network.Name
+		}
+		if len(o.K3s.Network.Aliases) > 0 {
+			target.K3s.Network.Aliases = append(target.K3s.Network.Aliases, o.K3s.Network.Aliases...)
+		}
+		if o.K3s.Network.Mode != "" {
+			target.K3s.Network.Mode = o.K3s.Network.Mode
+		}
 	}
 
 	// Certificate config
@@ -303,6 +333,33 @@ func WithK3sLogRedirection(enable bool) Option {
 	return optionFunc(func(o *Options) { o.K3s.LogRedirection = &enable })
 }
 
+func WithK3sNetwork(name string) Option {
+	return optionFunc(func(o *Options) {
+		if o.K3s.Network == nil {
+			o.K3s.Network = &NetworkConfig{}
+		}
+		o.K3s.Network.Name = name
+	})
+}
+
+func WithK3sNetworkAliases(aliases ...string) Option {
+	return optionFunc(func(o *Options) {
+		if o.K3s.Network == nil {
+			o.K3s.Network = &NetworkConfig{}
+		}
+		o.K3s.Network.Aliases = append(o.K3s.Network.Aliases, aliases...)
+	})
+}
+
+func WithK3sNetworkMode(mode string) Option {
+	return optionFunc(func(o *Options) {
+		if o.K3s.Network == nil {
+			o.K3s.Network = &NetworkConfig{}
+		}
+		o.K3s.Network.Mode = mode
+	})
+}
+
 // Logger options
 
 func WithLogger(logger Logger) Option {
@@ -356,6 +413,9 @@ func LoadConfigFromEnv() (*Options, error) {
 	v.SetDefault("k3s.image", DefaultK3sImage)
 	v.SetDefault("k3s.args", []string{})
 	v.SetDefault("k3s.log_redirection", DefaultK3sLogRedirection)
+	v.SetDefault("k3s.network.name", "")
+	v.SetDefault("k3s.network.aliases", []string{})
+	v.SetDefault("k3s.network.mode", "")
 	v.SetDefault("certificate.path", "")
 	v.SetDefault("certificate.validity", DefaultCertValidity)
 	v.SetDefault("manifest.paths", []string{})
@@ -431,6 +491,28 @@ func (opts *Options) validate() error {
 	// Certificate validity must be positive
 	if opts.Certificate.Validity <= 0 {
 		return fmt.Errorf("certificate validity must be positive, got %v", opts.Certificate.Validity)
+	}
+
+	// Validate network configuration
+	if opts.K3s.Network != nil {
+		// Network mode validation (must be one of: bridge, host, none, or container:<name>)
+		if opts.K3s.Network.Mode != "" {
+			validModes := []string{"bridge", "host", "none"}
+			isValid := false
+			for _, mode := range validModes {
+				if opts.K3s.Network.Mode == mode {
+					isValid = true
+					break
+				}
+			}
+			// Also allow "container:name" format
+			if !isValid && !strings.HasPrefix(opts.K3s.Network.Mode, "container:") {
+				return fmt.Errorf(
+					"network mode must be one of: bridge, host, none, container:<name>, got %s",
+					opts.K3s.Network.Mode,
+				)
+			}
+		}
 	}
 
 	return nil
