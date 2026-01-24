@@ -383,7 +383,14 @@ func (e *K3sEnv) InstallCRD(
 		return fmt.Errorf("failed to set GVK for CRD %s: %w", crd.GetName(), err)
 	}
 
-	err := e.cli.Patch(ctx, crd, client.Apply, client.ForceOwnership, client.FieldOwner("k3s-envtest"))
+	// Convert to unstructured for apply configuration
+	unstructuredCRD, err := resources.ToUnstructured(crd)
+	if err != nil {
+		return fmt.Errorf("failed to convert CRD %s to unstructured: %w", crd.GetName(), err)
+	}
+
+	applyConfig := client.ApplyConfigurationFromUnstructured(unstructuredCRD)
+	err = e.cli.Apply(ctx, applyConfig, client.ForceOwnership, client.FieldOwner("k3s-envtest"))
 	if err != nil {
 		return fmt.Errorf("failed to apply CRD %s: %w", crd.GetName(), err)
 	}

@@ -31,7 +31,14 @@ func (e *K3sEnv) installWebhook(
 		return fmt.Errorf("failed to set GVK for webhook %s: %w", webhook.GetName(), err)
 	}
 
-	err := e.cli.Patch(ctx, webhook, client.Apply, client.ForceOwnership, client.FieldOwner("k3s-envtest"))
+	// Convert to unstructured for apply configuration
+	unstructuredWebhook, err := resources.ToUnstructured(webhook)
+	if err != nil {
+		return fmt.Errorf("failed to convert webhook %s to unstructured: %w", webhook.GetName(), err)
+	}
+
+	applyConfig := client.ApplyConfigurationFromUnstructured(unstructuredWebhook)
+	err = e.cli.Apply(ctx, applyConfig, client.ForceOwnership, client.FieldOwner("k3s-envtest"))
 	if err != nil {
 		return fmt.Errorf("failed to apply webhook %s: %w", webhook.GetName(), err)
 	}
