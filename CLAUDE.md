@@ -21,14 +21,16 @@ Recent architectural enhancements include:
 - **Centralized Default Options** - Created NewDefaultOptions() function in k3senv_opts.go for better organization
 - **Enhanced Testing Framework** - Converted all tests to vanilla Gomega with dot imports for better readability
 - **Custom K3s Arguments** - Added support for custom k3s server arguments via WithK3sArgs()
+- **Network Configuration** - Support for custom Docker networks, network aliases, and network modes via WithK3sNetwork(), WithK3sNetworkAliases(), WithK3sNetworkMode()
 - **Component-Specific Polling** - Separate PollInterval configuration for CRD (100ms) and Webhook (500ms) components
 - **Container Log Redirection** - Forward k3s container logs to configurable Logger interface with [k3s] prefix
 - **Testcontainers Lifecycle Logging** - Forward testcontainers framework logs with emoji filtering via [testcontainers] prefix
 - **Structured Logging Interface** - Logger interface compatible with testing.T and debugging support
 - **Generic JQ Functions** - Type-safe JQ queries (QueryTyped[T], QuerySlice[T], QueryMap[K,V]) reduce boilerplate by 70%
 - **Pointer Booleans** - Boolean config fields use *bool to distinguish "not set" from "false" (breaking change)
+- **Podman Compatibility** - Full support for Podman as container runtime using `host-gateway` mechanism
 
-**Note:** Tests require Docker to be running as they spin up k3s containers using testcontainers-go.
+**Note:** Tests require Docker or Podman to be running as they spin up k3s containers using testcontainers-go.
 
 ## Development Commands
 
@@ -59,6 +61,28 @@ make test/race
 make test/cover
 # Opens coverage.html in browser
 ```
+
+### Testing with Podman
+
+k3s-envtest supports Podman as an alternative to Docker:
+
+```bash
+# Set up Podman environment
+export DOCKER_HOST=unix://$(podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}')
+export TESTCONTAINERS_RYUK_DISABLED=true
+
+# Run tests
+go test ./pkg/k3senv/...
+```
+
+**Requirements:**
+- Podman 4.1+ (for `host-gateway` support)
+- Podman machine running (macOS/Windows)
+
+**Technical Details:**
+- Uses `host.containers.internal:host-gateway` for container-to-host communication
+- Uses `CustomizeRequest` with `ExtraHosts` instead of `WithHostConfigModifier` to avoid overwriting k3s module's privileged settings
+- No special network configuration required
 
 ### Linting
 ```bash
@@ -218,6 +242,7 @@ The library now uses a structured configuration approach with logical groupings:
 - Prefix: `K3SENV_`
 - Nested config: `K3SENV_WEBHOOK_PORT`, `K3SENV_K3S_IMAGE`, `K3SENV_CERTIFICATE_PATH`
 - Polling intervals: `K3SENV_WEBHOOK_POLL_INTERVAL`, `K3SENV_CRD_POLL_INTERVAL`
+- Network config: `K3SENV_K3S_NETWORK_NAME`, `K3SENV_K3S_NETWORK_MODE`, `K3SENV_K3S_NETWORK_ALIASES`
 - Automatically loaded by `k3senv.New()` - explicit options override environment variables
 
 ### Dependencies

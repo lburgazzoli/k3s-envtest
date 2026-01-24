@@ -19,7 +19,7 @@ A Go library for creating lightweight k3s-based test environments, similar to ho
 ### Prerequisites
 
 - Go 1.24.8 or later
-- Docker running locally (for testcontainers)
+- Docker or Podman running locally (for testcontainers)
 
 ### Installation
 
@@ -519,6 +519,26 @@ func TestWebhookB(t *testing.T) {
 docker ps  # Should work without errors
 ```
 
+### Podman Support
+
+k3s-envtest fully supports Podman as an alternative to Docker.
+
+**Setup:**
+```bash
+# Set environment variables
+export DOCKER_HOST=unix://$(podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}')
+export TESTCONTAINERS_RYUK_DISABLED=true
+
+# Run your tests
+go test ./...
+```
+
+**Requirements:**
+- Podman 4.1+ (for `host-gateway` support)
+- Podman machine running (macOS/Windows)
+
+**Note:** The library uses `host.containers.internal` hostname for container-to-host communication, which works on both Docker and Podman.
+
 ### Port Conflicts
 
 **Problem**: `Webhook port already in use`
@@ -558,6 +578,14 @@ export WEBHOOK_PORT=9443  # Missing K3SENV_ prefix
 ## Architecture
 
 For detailed information about design decisions and architecture, see [docs/architecture.md](docs/architecture.md).
+
+## Breaking Changes
+
+### Podman Support Release
+
+- `WebhookHost()` now returns `host.containers.internal:PORT` instead of `host.testcontainers.internal:PORT`
+- Webhook URLs use `host.containers.internal` hostname
+- **Migration**: Use `k3senv.DefaultWebhookContainerHost` constant instead of hardcoded hostnames
 
 ## Contributing
 
