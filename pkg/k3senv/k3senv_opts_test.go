@@ -256,7 +256,7 @@ func TestLoggerFunc(t *testing.T) {
 
 	// Test that LoggerFunc can wrap a Printf-style function
 	var logMessages []string
-	printfFunc := func(format string, args ...interface{}) {
+	printfFunc := func(format string, args ...any) {
 		logMessages = append(logMessages, fmt.Sprintf(format, args...))
 	}
 
@@ -460,6 +460,6 @@ type mockLogger struct {
 	messages *[]string
 }
 
-func (m *mockLogger) Logf(format string, args ...interface{}) {
+func (m *mockLogger) Logf(format string, args ...any) {
 	*m.messages = append(*m.messages, fmt.Sprintf(format, args...))
 }

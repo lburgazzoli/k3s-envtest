@@ -606,7 +606,7 @@ func (e *K3sEnv) prepareManifests() error {
 }
 
 // debugf logs a debug message if a logger is configured.
-func (e *K3sEnv) debugf(format string, args ...interface{}) {
+func (e *K3sEnv) debugf(format string, args ...any) {
 	if e.options.Logger != nil {
 		e.options.Logger.Logf("[k3senv] "+format, args...)
 	}

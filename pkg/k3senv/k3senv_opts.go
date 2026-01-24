@@ -3,6 +3,7 @@ package k3senv
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -64,7 +65,7 @@ func Bool(b bool) *bool {
 //	zapLogger, _ := zap.NewDevelopment()
 //	env, err := k3senv.New(k3senv.WithLogger(k3senv.LoggerFunc(zapLogger.Sugar().Infof)))
 type Logger interface {
-	Logf(format string, args ...interface{})
+	Logf(format string, args ...any)
 }
 
 // LoggerFunc is an adapter that allows a printf-style function to be used as a Logger.
@@ -74,10 +75,10 @@ type Logger interface {
 //
 //	logger := log.New(os.Stderr, "[k3senv] ", log.LstdFlags)
 //	env, err := k3senv.New(k3senv.WithLogger(k3senv.LoggerFunc(logger.Printf)))
-type LoggerFunc func(format string, args ...interface{})
+type LoggerFunc func(format string, args ...any)
 
 // Logf implements the Logger interface by calling the underlying function.
-func (f LoggerFunc) Logf(format string, args ...interface{}) {
+func (f LoggerFunc) Logf(format string, args ...any) {
 	f(format, args...)
 }
 
@@ -498,13 +499,7 @@ func (opts *Options) validate() error {
 		// Network mode validation (must be one of: bridge, host, none, or container:<name>)
 		if opts.K3s.Network.Mode != "" {
 			validModes := []string{"bridge", "host", "none"}
-			isValid := false
-			for _, mode := range validModes {
-				if opts.K3s.Network.Mode == mode {
-					isValid = true
-					break
-				}
-			}
+			isValid := slices.Contains(validModes, opts.K3s.Network.Mode)
 			// Also allow "container:name" format
 			if !isValid && !strings.HasPrefix(opts.K3s.Network.Mode, "container:") {
 				return fmt.Errorf(

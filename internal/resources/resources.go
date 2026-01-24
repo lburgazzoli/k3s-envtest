@@ -33,7 +33,7 @@ func ToUnstructured(obj any) (*unstructured.Unstructured, error) {
 // YAMLToUnstructured converts a YAML string to an unstructured object.
 // This is useful for testing purposes.
 func YAMLToUnstructured(yamlStr string) (*unstructured.Unstructured, error) {
-	var data map[string]interface{}
+	var data map[string]any
 	if err := yaml.Unmarshal([]byte(yamlStr), &data); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal yaml: %w", err)
 	}
@@ -107,7 +107,7 @@ func Decode(content []byte) ([]unstructured.Unstructured, error) {
 	yd := yaml.NewDecoder(r)
 
 	for {
-		var out map[string]interface{}
+		var out map[string]any
 
 		err := yd.Decode(&out)
 		if err != nil {
