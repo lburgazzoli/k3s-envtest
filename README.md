@@ -523,13 +523,26 @@ docker ps  # Should work without errors
 
 k3s-envtest fully supports Podman as an alternative to Docker.
 
-**Setup:**
+**Automatic Detection (via Makefile):**
+
+The Makefile automatically detects and configures Podman:
 ```bash
-# Set environment variables
+make test        # Auto-detects Docker or Podman
+make test/race   # Auto-detects Docker or Podman
+make test/cover  # Auto-detects Docker or Podman
+```
+
+**Manual Setup:**
+
+For running tests directly with `go test` or IDE integration:
+```bash
+# Option 1: Source the setup script
+source scripts/setup-podman.sh
+go test ./...
+
+# Option 2: Set environment variables manually
 export DOCKER_HOST=unix://$(podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}')
 export TESTCONTAINERS_RYUK_DISABLED=true
-
-# Run your tests
 go test ./...
 ```
 

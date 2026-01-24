@@ -44,17 +44,51 @@ fmt: ## Format Go source code
 	@$(GOLANGCI) fmt --config .golangci.yml
 	go fmt ./...
 
+## Container Runtime Detection
+# Auto-detect Docker or Podman and configure environment
+define configure_container_runtime
+	@echo "Detecting container runtime..."; \
+	if docker info >/dev/null 2>&1; then \
+		echo "✓ Using Docker"; \
+	elif command -v podman >/dev/null 2>&1; then \
+		if podman machine inspect >/dev/null 2>&1; then \
+			echo "✓ Using Podman (via podman machine)"; \
+			export DOCKER_HOST="unix://$$(podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}')"; \
+			export TESTCONTAINERS_RYUK_DISABLED=true; \
+		elif [ -S "$${XDG_RUNTIME_DIR}/podman/podman.sock" ]; then \
+			echo "✓ Using Podman (via XDG_RUNTIME_DIR)"; \
+			export DOCKER_HOST="unix://$${XDG_RUNTIME_DIR}/podman/podman.sock"; \
+			export TESTCONTAINERS_RYUK_DISABLED=true; \
+		else \
+			echo "ERROR: Podman found but not running."; \
+			echo "  - macOS/Windows: Run 'podman machine start'"; \
+			echo "  - Linux: Ensure Podman socket exists"; \
+			exit 1; \
+		fi; \
+	else \
+		echo "ERROR: Neither Docker nor Podman is available"; \
+		echo "  Install Docker: https://docs.docker.com/get-docker/"; \
+		echo "  Install Podman: https://podman.io/getting-started/installation"; \
+		exit 1; \
+	fi
+endef
+
+.PHONY: container-runtime
+container-runtime: ## Detect and display container runtime configuration
+	@$(configure_container_runtime)
+
 .PHONY: test
 test: ## Run all tests
-	go test -v ./...
+	@$(configure_container_runtime) && go test -v ./...
 
 .PHONY: test/race
 test/race: ## Run tests with the race detector
-	go test -race ./...
+	@$(configure_container_runtime) && go test -race ./...
 
 .PHONY: test/cover
 test/cover: ## Run tests and generate a coverage report
-	go test -v -coverprofile=coverage.out ./...
+	@$(configure_container_runtime) && \
+	go test -v -coverprofile=coverage.out ./... && \
 	go tool cover -html=coverage.out -o coverage.html
 
 .PHONY: deps
