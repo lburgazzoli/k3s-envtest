@@ -349,6 +349,10 @@ func (f *fakeCRDClient) DeleteAllOf(ctx context.Context, obj client.Object, opts
 	return nil
 }
 
+func (f *fakeCRDClient) Apply(ctx context.Context, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
+	return nil
+}
+
 func (f *fakeCRDClient) Status() client.SubResourceWriter {
 	return nil
 }
