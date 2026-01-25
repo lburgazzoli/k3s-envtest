@@ -3,6 +3,9 @@
 A Go library for creating lightweight k3s-based test environments, similar to how envtest provides Kubernetes API server environments for testing.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/lburgazzoli/k3s-envtest.svg)](https://pkg.go.dev/github.com/lburgazzoli/k3s-envtest)
+[![CI](https://github.com/lburgazzoli/k3s-envtest/workflows/CI/badge.svg)](https://github.com/lburgazzoli/k3s-envtest/actions)
+[![Docker](https://img.shields.io/badge/runtime-docker-blue)](https://www.docker.com/)
+[![Podman](https://img.shields.io/badge/runtime-podman-purple)](https://podman.io/)
 
 ## Features
 

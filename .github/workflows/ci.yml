@@ -40,8 +40,12 @@ jobs:
         run: make vuln
 
   test:
-    name: Test
+    name: Test (${{ matrix.container-runtime }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        container-runtime: [docker, podman]
+      fail-fast: false
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -51,6 +55,30 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: true
+
+      - name: Configure Podman
+        if: matrix.container-runtime == 'podman'
+        run: |
+          # Enable Podman socket for rootless mode (ubuntu-latest uses systemd user service)
+          systemctl --user enable --now podman.socket
+
+          # Set environment variables for testcontainers
+          echo "DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/podman/podman.sock" >> $GITHUB_ENV
+          echo "TESTCONTAINERS_RYUK_DISABLED=true" >> $GITHUB_ENV
+
+          # Verify Podman is working
+          podman version
+          podman info
+
+      - name: Verify Container Runtime
+        run: |
+          if [ "${{ matrix.container-runtime }}" = "podman" ]; then
+            podman ps || exit 1
+            echo "✓ Podman is configured and running"
+          else
+            docker ps || exit 1
+            echo "✓ Docker is configured and running"
+          fi
 
       - name: Run tests
         run: make test

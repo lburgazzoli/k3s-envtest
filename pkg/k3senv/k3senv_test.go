@@ -41,11 +41,13 @@ func TestHostGatewayAccess(t *testing.T) {
 
 	// Create a listener on 0.0.0.0 so it's accessible from containers
 	// (httptest.NewServer uses 127.0.0.1 which is not accessible from containers)
-	listener, err := net.Listen("tcp", "0.0.0.0:0")
+	lc := net.ListenConfig{}
+	listener, err := lc.Listen(ctx, "tcp", "0.0.0.0:0")
 	g.Expect(err).NotTo(HaveOccurred())
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	// Start HTTP server on this listener
+	//nolint:gosec // G112: Short-lived test server, timeout not critical
 	server := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -55,7 +57,7 @@ func TestHostGatewayAccess(t *testing.T) {
 	go func() {
 		_ = server.Serve(listener)
 	}()
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 
 	// Get the port from the listener
 	hostPort := listener.Addr().(*net.TCPAddr).Port
