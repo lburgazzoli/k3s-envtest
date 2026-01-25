@@ -46,17 +46,29 @@ fmt: ## Format Go source code
 
 ## Container Runtime Detection
 # Auto-detect Docker or Podman and configure environment
+# Priority: pre-configured DOCKER_HOST > Docker > Podman > Error
 define configure_container_runtime
 	@echo "Detecting container runtime..."; \
-	if docker info >/dev/null 2>&1; then \
-		echo "✓ Using Docker"; \
+	if [ -n "$$DOCKER_HOST" ]; then \
+		echo "DOCKER_HOST already set: $$DOCKER_HOST"; \
+		case "$$DOCKER_HOST" in \
+			*podman*) \
+				echo "✓ Using Podman (pre-configured via DOCKER_HOST)"; \
+				export TESTCONTAINERS_RYUK_DISABLED=true; \
+				;; \
+			*) \
+				echo "✓ Using Docker (pre-configured via DOCKER_HOST)"; \
+				;; \
+		esac; \
+	elif docker info >/dev/null 2>&1; then \
+		echo "✓ Using Docker (auto-detected)"; \
 	elif command -v podman >/dev/null 2>&1; then \
 		if podman machine inspect >/dev/null 2>&1; then \
-			echo "✓ Using Podman (via podman machine)"; \
+			echo "✓ Using Podman (auto-detected via podman machine)"; \
 			export DOCKER_HOST="unix://$$(podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}')"; \
 			export TESTCONTAINERS_RYUK_DISABLED=true; \
 		elif [ -S "$${XDG_RUNTIME_DIR}/podman/podman.sock" ]; then \
-			echo "✓ Using Podman (via XDG_RUNTIME_DIR)"; \
+			echo "✓ Using Podman (auto-detected via XDG_RUNTIME_DIR)"; \
 			export DOCKER_HOST="unix://$${XDG_RUNTIME_DIR}/podman/podman.sock"; \
 			export TESTCONTAINERS_RYUK_DISABLED=true; \
 		else \
