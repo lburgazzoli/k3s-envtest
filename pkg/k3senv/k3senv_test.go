@@ -5,8 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
-	"net/url"
+	"strconv"
 	"testing"
 
 	"github.com/lburgazzoli/k3s-envtest/internal/testdata/v1alpha1"
@@ -40,17 +39,26 @@ func TestHostGatewayAccess(t *testing.T) {
 	g := NewWithT(t)
 	ctx := context.Background()
 
-	// Start a simple HTTP server on the host
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("OK"))
-	}))
+	// Create a listener on 0.0.0.0 so it's accessible from containers
+	// (httptest.NewServer uses 127.0.0.1 which is not accessible from containers)
+	listener, err := net.Listen("tcp", "0.0.0.0:0")
+	g.Expect(err).NotTo(HaveOccurred())
+	defer listener.Close()
+
+	// Start HTTP server on this listener
+	server := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("OK"))
+		}),
+	}
+	go func() {
+		_ = server.Serve(listener)
+	}()
 	defer server.Close()
 
-	// Parse the port from the server URL
-	serverURL, err := url.Parse(server.URL)
-	g.Expect(err).NotTo(HaveOccurred())
-	hostPort := serverURL.Port()
+	// Get the port from the listener
+	hostPort := listener.Addr().(*net.TCPAddr).Port
 
 	// Start a container with host-gateway access using CustomizeRequest
 	// (not WithHostConfigModifier, which overwrites existing modifiers)
@@ -70,7 +78,7 @@ func TestHostGatewayAccess(t *testing.T) {
 	})
 
 	// Execute curl from inside the container to reach the host
-	hostAddr := net.JoinHostPort(k3senv.DefaultWebhookContainerHost, hostPort)
+	hostAddr := net.JoinHostPort(k3senv.DefaultWebhookContainerHost, strconv.Itoa(hostPort))
 	code, reader, err := ctr.Exec(ctx, []string{
 		"curl", "-sf", "http://" + hostAddr,
 	})
