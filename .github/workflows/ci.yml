@@ -59,22 +59,23 @@ jobs:
       - name: Configure Podman
         if: matrix.container-runtime == 'podman'
         run: |
-          # Enable Podman socket for rootless mode (ubuntu-latest uses systemd user service)
-          systemctl --user enable --now podman.socket
+          # Enable Podman socket in rootful mode (k3s requires privileged containers)
+          # Rootless Podman cannot properly run k3s due to cgroup permission issues
+          sudo systemctl enable --now podman.socket
 
           # Set environment variables for testcontainers
-          echo "DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/podman/podman.sock" >> $GITHUB_ENV
+          echo "DOCKER_HOST=unix:///run/podman/podman.sock" >> $GITHUB_ENV
           echo "TESTCONTAINERS_RYUK_DISABLED=true" >> $GITHUB_ENV
 
           # Verify Podman is working
-          podman version
-          podman info
+          sudo podman version
+          sudo podman info
 
       - name: Verify Container Runtime
         run: |
           if [ "${{ matrix.container-runtime }}" = "podman" ]; then
-            podman ps || exit 1
-            echo "✓ Podman is configured and running"
+            sudo podman ps || exit 1
+            echo "✓ Podman is configured and running (rootful mode)"
           else
             docker ps || exit 1
             echo "✓ Docker is configured and running"

@@ -552,6 +552,11 @@ go test ./...
 **Requirements:**
 - Podman 4.1+ (for `host-gateway` support)
 - Podman machine running (macOS/Windows)
+- **Rootful mode for k3s**: k3s containers require privileged mode to access cgroups. While rootless Podman works for most containers, k3s needs rootful Podman (run with `sudo`) in CI environments like GitHub Actions.
+
+**Rootless vs Rootful:**
+- **Local Development (macOS/Windows)**: Rootless Podman via `podman machine` works fine for most use cases
+- **CI/CD (Linux)**: Use rootful Podman (`sudo systemctl enable --now podman.socket`) because k3s requires privileged containers
 
 **Note:** The library uses `host.containers.internal` hostname for container-to-host communication, which works on both Docker and Podman.
 

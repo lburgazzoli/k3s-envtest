@@ -78,11 +78,13 @@ go test ./pkg/k3senv/...
 **Requirements:**
 - Podman 4.1+ (for `host-gateway` support)
 - Podman machine running (macOS/Windows)
+- **Rootful mode for CI**: k3s containers require privileged mode for cgroup access. GitHub Actions CI uses rootful Podman (`sudo systemctl enable --now podman.socket`) with socket at `/run/podman/podman.sock`
 
 **Technical Details:**
 - Uses `host.containers.internal:host-gateway` for container-to-host communication
 - Uses `CustomizeRequest` with `ExtraHosts` instead of `WithHostConfigModifier` to avoid overwriting k3s module's privileged settings
 - No special network configuration required
+- **Privileged containers**: k3s module sets privileged mode automatically. Rootless Podman cannot grant true privileged access, causing cgroup permission errors
 
 ### Linting
 ```bash
